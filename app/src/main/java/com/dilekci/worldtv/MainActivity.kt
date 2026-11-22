@@ -3,12 +3,16 @@ package com.dilekci.worldtv
 
 import android.app.Activity
 import android.os.Bundle
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.dilekci.worldtv.databinding.ActivityMainBinding
@@ -17,9 +21,10 @@ class MainActivity : Activity() {
 
     private lateinit var binding: ActivityMainBinding
     private var player: ExoPlayer? = null
-    private var playerView: PlayerView? = null
+    private var videoScreen: FrameLayout? = null
+    private var channelPanel: LinearLayout? = null
     private var channelList: LinearLayout? = null
-    private var isPlaying = false
+    private var currentChannel = 0
 
     private val sections = listOf(
         "Ana Sayfa", "Canlı TV", "Filmler", "Diziler",
@@ -57,14 +62,17 @@ class MainActivity : Activity() {
                 setTextColor(getColor(android.R.color.white))
                 setPadding(22, 14, 22, 14)
                 isFocusable = true
-                isFocusableInTouchMode = true
                 setBackgroundResource(R.drawable.nav_item_background)
-                setOnClickListener { selectSection(title) }
-                contentDescription = title
+                setOnClickListener {
+                    selectSection(title)
+                }
             }
 
             binding.sectionContainer.addView(item)
-            if (index == 0) item.requestFocus()
+
+            if (index == 0) {
+                item.requestFocus()
+            }
         }
 
         binding.primaryAction.setOnClickListener {
@@ -77,7 +85,7 @@ class MainActivity : Activity() {
     }
 
     private fun selectSection(section: String) {
-        stopPlayer()
+        closeVideo()
         removeChannelList()
 
         binding.sectionTitle.text = section
@@ -106,7 +114,8 @@ class MainActivity : Activity() {
     }
 
     private fun showChannels() {
-        val parent = binding.contentDescription.parent as LinearLayout
+        val parent =
+            binding.contentDescription.parent as LinearLayout
 
         val list = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -121,113 +130,225 @@ class MainActivity : Activity() {
                 setPadding(20, 18, 20, 18)
                 isFocusable = true
                 setBackgroundResource(R.drawable.nav_item_background)
-
                 setOnClickListener {
-                    playChannel(channel)
+                    openVideo(index)
                 }
             }
-
             list.addView(item)
         }
 
         parent.addView(list)
         channelList = list
-    }
-
-    private fun playChannel(channel: Channel) {
-        stopPlayer()
-        removeChannelList()
-
-        binding.contentTitle.visibility = View.GONE
-        binding.contentDescription.visibility = View.GONE
-        binding.primaryAction.visibility = View.GONE
-        binding.secondaryAction.visibility = View.GONE
-
-        val parent = binding.sectionTitle.parent as LinearLayout
-
-        val videoView = PlayerView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-            useController = true
-            isFocusable = true
-        }
-
-        parent.addView(videoView)
-        playerView = videoView
-
-        try {
-            val exoPlayer = ExoPlayer.Builder(this).build()
-            player = exoPlayer
-            videoView.player = exoPlayer
-
-            exoPlayer.setMediaItem(
-                MediaItem.fromUri(channel.url)
-            )
-            exoPlayer.prepare()
-            exoPlayer.playWhenReady = true
-            isPlaying = true
-
-            Toast.makeText(
-                this,
-                "${channel.name} açılıyor",
-                Toast.LENGTH_SHORT
-            ).show()
-
-            videoView.requestFocus()
-        } catch (e: Exception) {
-            Toast.makeText(
-                this,
-                "Yayın başlatılamadı",
-                Toast.LENGTH_LONG
-            ).show()
-            stopPlayer()
-            selectSection("Canlı TV")
-        }
+        list.getChildAt(0)?.requestFocus()
     }
 
     private fun removeChannelList() {
-        channelList?.let { list ->
-            (list.parent as? LinearLayout)?.removeView(list)
+        channelList?.let {
+            (it.parent as? LinearLayout)?.removeView(it)
         }
         channelList = null
     }
 
-    private fun stopPlayer() {
-        playerView?.let { view ->
-            view.player = null
-            (view.parent as? LinearLayout)?.removeView(view)
+    private fun openVideo(index: Int) {
+        closeVideo()
+        currentChannel = index
+
+        val root = binding.root.parent as? FrameLayout
+        val screen = FrameLayout(this).apply {
+            setBackgroundColor(
+                getColor(android.R.color.black)
+            )
+            isFocusable = true
+            isFocusableInTouchMode = true
         }
+
+        if (root != null) {
+            root.addView(
+                screen,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            )
+        } else {
+            addContentView(
+                screen,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+
+        videoScreen = screen
+
+        val videoView = PlayerView(this).apply {
+            useController = false
+            setBackgroundColor(
+                getColor(android.R.color.black)
+            )
+        }
+
+        screen.addView(
+            videoView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        val exoPlayer = ExoPlayer.Builder(this).build()
+        player = exoPlayer
+        videoView.player = exoPlayer
+
+        exoPlayer.addListener(object : Player.Listener {
+            override fun onPlayerError(
+                error: PlaybackException
+            ) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Yayın açılamadı: ${channels[currentChannel].name}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        })
+
+        playChannel(index)
+        screen.requestFocus()
+    }
+
+    private fun playChannel(index: Int) {
+        currentChannel = index
+        val channel = channels[index]
+
+        try {
+            player?.apply {
+                stop()
+                clearMediaItems()
+                setMediaItem(MediaItem.fromUri(channel.url))
+                prepare()
+                playWhenReady = true
+            }
+
+            Toast.makeText(
+                this,
+                "${index + 1}. ${channel.name} açılıyor",
+                Toast.LENGTH_SHORT
+            ).show()
+        } catch (e: Exception) {
+            Toast.makeText(
+                this,
+                "Kanal başlatılamadı",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun showSideChannels() {
+        val screen = videoScreen ?: return
+
+        if (channelPanel != null) return
+
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 24, 16, 24)
+            setBackgroundColor(0xEE192638.toInt())
+            isFocusable = false
+        }
+
+        val width = (280 * resources.displayMetrics.density).toInt()
+
+        screen.addView(
+            panel,
+            FrameLayout.LayoutParams(
+                width,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.START
+            )
+        )
+
+        channelPanel = panel
+
+        val heading = TextView(this).apply {
+            text = "KANALLAR"
+            textSize = 22f
+            setTextColor(getColor(android.R.color.white))
+            setPadding(12, 12, 12, 24)
+        }
+
+        panel.addView(heading)
+
+        channels.forEachIndexed { index, channel ->
+            val item = TextView(this).apply {
+                text = "${index + 1}. ${channel.name}"
+                textSize = 19f
+                setTextColor(getColor(android.R.color.white))
+                setPadding(14, 20, 14, 20)
+                isFocusable = true
+                setBackgroundResource(R.drawable.nav_item_background)
+
+                setOnClickListener {
+                    playChannel(index)
+                    hideSideChannels()
+                }
+            }
+
+            panel.addView(item)
+        }
+
+        panel.getChildAt(currentChannel + 1)?.requestFocus()
+    }
+
+    private fun hideSideChannels() {
+        channelPanel?.let {
+            (it.parent as? FrameLayout)?.removeView(it)
+        }
+
+        channelPanel = null
+        videoScreen?.requestFocus()
+    }
+
+    private fun closeVideo() {
+        hideSideChannels()
 
         player?.release()
         player = null
-        playerView = null
-        isPlaying = false
+
+        videoScreen?.let {
+            (it.parent as? FrameLayout)?.removeView(it)
+        }
+
+        videoScreen = null
     }
 
-    override fun onKeyDown(
-        keyCode: Int,
-        event: KeyEvent?
-    ): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_BACK) {
-            if (isPlaying) {
-                selectSection("Canlı TV")
-                return true
-            }
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (
+            event.action == KeyEvent.ACTION_DOWN &&
+            videoScreen != null
+        ) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT,
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    showSideChannels()
+                    return true
+                }
 
-            if (binding.sectionTitle.text != "Ana Sayfa") {
-                selectSection("Ana Sayfa")
-                return true
+                KeyEvent.KEYCODE_BACK -> {
+                    if (channelPanel != null) {
+                        hideSideChannels()
+                    } else {
+                        selectSection("Canlı TV")
+                    }
+                    return true
+                }
             }
         }
 
-        return super.onKeyDown(keyCode, event)
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onDestroy() {
-        stopPlayer()
+        closeVideo()
         super.onDestroy()
     }
 }
