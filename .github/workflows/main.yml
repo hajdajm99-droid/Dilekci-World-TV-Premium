@@ -26,8 +26,8 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: APK olustur
-        run: gradle assembleDebug
+      - name: Temiz APK olustur
+        run: gradle clean assembleDebug --no-build-cache
 
       - name: APK dosyasini yukle
         uses: actions/upload-artifact@v4
