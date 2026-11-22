@@ -20,6 +20,7 @@ import com.dilekci.worldtv.databinding.ActivityMainBinding
 class MainActivity : Activity() {
 
     private lateinit var binding: ActivityMainBinding
+
     private var player: ExoPlayer? = null
     private var videoScreen: FrameLayout? = null
     private var channelPanel: LinearLayout? = null
@@ -38,8 +39,8 @@ class MainActivity : Activity() {
 
     private val channels = listOf(
         Channel(
-            "NASA TV",
-            "https://ntv1.akamaized.net/hls/live/2017906/NASA-NTV1/master.m3u8"
+            "NASA TV Public",
+            "https://ntv1.akamaized.net/hls/live/2014075/NASA-NTV1-HLS/master.m3u8"
         ),
         Channel(
             "DW English",
@@ -130,10 +131,12 @@ class MainActivity : Activity() {
                 setPadding(20, 18, 20, 18)
                 isFocusable = true
                 setBackgroundResource(R.drawable.nav_item_background)
+
                 setOnClickListener {
                     openVideo(index)
                 }
             }
+
             list.addView(item)
         }
 
@@ -153,7 +156,6 @@ class MainActivity : Activity() {
         closeVideo()
         currentChannel = index
 
-        val root = binding.root.parent as? FrameLayout
         val screen = FrameLayout(this).apply {
             setBackgroundColor(
                 getColor(android.R.color.black)
@@ -162,23 +164,13 @@ class MainActivity : Activity() {
             isFocusableInTouchMode = true
         }
 
-        if (root != null) {
-            root.addView(
-                screen,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                )
+        addContentView(
+            screen,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
             )
-        } else {
-            addContentView(
-                screen,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                )
-            )
-        }
+        )
 
         videoScreen = screen
 
@@ -235,6 +227,7 @@ class MainActivity : Activity() {
                 "${index + 1}. ${channel.name} açılıyor",
                 Toast.LENGTH_SHORT
             ).show()
+
         } catch (e: Exception) {
             Toast.makeText(
                 this,
@@ -253,10 +246,10 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(16, 24, 16, 24)
             setBackgroundColor(0xEE192638.toInt())
-            isFocusable = false
         }
 
-        val width = (280 * resources.displayMetrics.density).toInt()
+        val width =
+            (280 * resources.displayMetrics.density).toInt()
 
         screen.addView(
             panel,
