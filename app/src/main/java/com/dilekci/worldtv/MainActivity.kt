@@ -93,6 +93,12 @@ class MainActivity : Activity() {
             "https://abc-news-dmd-streams-1.akamaized.net/out/v1/abc83881886746b0802dc3e7ca2bc792/index.m3u8",
             "Avustralya",
             "🌍 Dünya TV"
+        ),
+        Channel(
+            "NHK WORLD-JAPAN",
+            "https://media-tyo.hls.nhkworld.jp/hls/w/live/master.m3u8",
+            "Japonya",
+            "🌍 Dünya TV"
         )
     )
 
@@ -102,6 +108,7 @@ class MainActivity : Activity() {
         Country("Avustralya", "🇦🇺"),
         Country("Fransa", "🇫🇷"),
         Country("İngiltere", "🇬🇧"),
+        Country("Japonya", "🇯🇵"),
         Country("Kanada", "🇨🇦")
     )
 
