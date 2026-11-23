@@ -105,6 +105,12 @@ class MainActivity : Activity() {
             "https://amdlive-ch01-ctnd-com.akamaized.net/arirang_1ch/smil:arirang_1ch.smil/playlist.m3u8",
             "Güney Kore",
             "🌍 Dünya TV"
+        ),
+        Channel(
+            "RTVE 24h",
+            "https://rtvelivestream.rtve.es/rtvesec/24h/24h_main_dvr.m3u8",
+            "İspanya",
+            "🌍 Dünya TV"
         )
     )
 
@@ -115,6 +121,7 @@ class MainActivity : Activity() {
         Country("Fransa", "🇫🇷"),
         Country("Güney Kore", "🇰🇷"),
         Country("İngiltere", "🇬🇧"),
+        Country("İspanya", "🇪🇸"),
         Country("Japonya", "🇯🇵"),
         Country("Kanada", "🇨🇦")
     )
