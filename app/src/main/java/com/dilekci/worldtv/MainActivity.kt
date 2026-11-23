@@ -87,12 +87,19 @@ class MainActivity : Activity() {
             "https://hls.savoir.media/live/stream.m3u8",
             "Kanada",
             "🌍 Dünya TV"
+        ),
+        Channel(
+            "ABC News Australia",
+            "https://abc-news-dmd-streams-1.akamaized.net/out/v1/abc83881886746b0802dc3e7ca2bc792/index.m3u8",
+            "Avustralya",
+            "🌍 Dünya TV"
         )
     )
 
     private val countries = listOf(
         Country("ABD", "🇺🇸"),
         Country("Almanya", "🇩🇪"),
+        Country("Avustralya", "🇦🇺"),
         Country("Fransa", "🇫🇷"),
         Country("İngiltere", "🇬🇧"),
         Country("Kanada", "🇨🇦")
