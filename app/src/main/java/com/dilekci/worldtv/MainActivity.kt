@@ -107,8 +107,8 @@ class MainActivity : Activity() {
             "🌍 Dünya TV"
         ),
         Channel(
-            "RTVE 24h",
-            "https://rtvelivestream.rtve.es/rtvesec/24h/24h_main_dvr.m3u8",
+            "Canal Sur Andalucía",
+            "https://d4oe4cnrgi9c9.cloudfront.net/master.m3u8",
             "İspanya",
             "🌍 Dünya TV"
         )
