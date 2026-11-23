@@ -107,9 +107,21 @@ class MainActivity : Activity() {
             "🌍 Dünya TV"
         ),
         Channel(
-            "Rai News 24",
-            "https://8e7439fdb1694c8da3a0fd63e4dda518.msvdn.net/rainews1/hls/playlist_mo.m3u8",
-            "İtalya",
+            "Canal Once",
+            "https://vivo.canaloncelive.tv/securepkgr3/oncemexico/playlist.m3u8",
+            "Meksika",
+            "🌍 Dünya TV"
+        ),
+        Channel(
+            "TVR International",
+            "https://tvr-international.lg.mncdn.com/tvrinternational/smil:tvrinternational.smil/playlist.m3u8",
+            "Romanya",
+            "🌍 Dünya TV"
+        ),
+        Channel(
+            "SKAI TV",
+            "https://skai-live-back.siliconweb.com/media/cambria4/index.m3u8",
+            "Yunanistan",
             "🌍 Dünya TV"
         )
     )
@@ -121,9 +133,11 @@ class MainActivity : Activity() {
         Country("Fransa", "🇫🇷"),
         Country("Güney Kore", "🇰🇷"),
         Country("İngiltere", "🇬🇧"),
-        Country("İtalya", "🇮🇹"),
         Country("Japonya", "🇯🇵"),
-        Country("Kanada", "🇨🇦")
+        Country("Kanada", "🇨🇦"),
+        Country("Meksika", "🇲🇽"),
+        Country("Romanya", "🇷🇴"),
+        Country("Yunanistan", "🇬🇷")
     )
 
     private var countryColumn: LinearLayout? = null
@@ -133,9 +147,7 @@ class MainActivity : Activity() {
         return (value * resources.displayMetrics.density).toInt()
     }
 
-    private fun channelsForCountry(
-        country: String
-    ): List<Channel> {
+    private fun channelsForCountry(country: String): List<Channel> {
         return channels.filter {
             it.country == country &&
                 it.category == "🌍 Dünya TV"
@@ -143,9 +155,7 @@ class MainActivity : Activity() {
     }
 
     private fun visibleCountries(): List<Country> {
-        val collator = Collator.getInstance(
-            Locale("tr", "TR")
-        )
+        val collator = Collator.getInstance(Locale("tr", "TR"))
 
         return countries.filter {
             channelsForCountry(it.name).isNotEmpty()
@@ -176,16 +186,13 @@ class MainActivity : Activity() {
         binding.secondaryAction.visibility = View.GONE
 
         categories.forEach { category ->
-
             val item = TextView(this).apply {
                 text = category
                 textSize = 17f
                 setTextColor(0xFFFFFFFF.toInt())
                 setPadding(16, 20, 12, 20)
                 isFocusable = true
-                setBackgroundResource(
-                    R.drawable.nav_item_background
-                )
+                setBackgroundResource(R.drawable.nav_item_background)
 
                 setOnClickListener {
                     selectCategory(category)
@@ -196,9 +203,7 @@ class MainActivity : Activity() {
         }
 
         selectCategory("🌍 Dünya TV")
-
-        binding.sectionContainer.getChildAt(1)
-            ?.requestFocus()
+        binding.sectionContainer.getChildAt(1)?.requestFocus()
     }
 
     private fun selectCategory(category: String) {
@@ -246,20 +251,12 @@ class MainActivity : Activity() {
 
         container.addView(
             countriesScroll,
-            LinearLayout.LayoutParams(
-                0,
-                dp(360),
-                1f
-            )
+            LinearLayout.LayoutParams(0, dp(360), 1f)
         )
 
         container.addView(
             channelsScroll,
-            LinearLayout.LayoutParams(
-                0,
-                dp(360),
-                1.5f
-            )
+            LinearLayout.LayoutParams(0, dp(360), 1.5f)
         )
 
         parent.addView(container)
@@ -271,16 +268,13 @@ class MainActivity : Activity() {
         val availableCountries = visibleCountries()
 
         availableCountries.forEach { country ->
-
             val item = TextView(this).apply {
                 text = "${country.flag} ${country.name}"
                 textSize = 19f
                 setTextColor(0xFFFFFFFF.toInt())
                 setPadding(12, 18, 12, 18)
                 isFocusable = true
-                setBackgroundResource(
-                    R.drawable.nav_item_background
-                )
+                setBackgroundResource(R.drawable.nav_item_background)
 
                 setOnClickListener {
                     currentCountry = country.name
@@ -292,9 +286,7 @@ class MainActivity : Activity() {
         }
 
         if (availableCountries.isNotEmpty()) {
-            if (availableCountries.none {
-                    it.name == currentCountry
-                }) {
+            if (availableCountries.none { it.name == currentCountry }) {
                 currentCountry = availableCountries.first().name
             }
 
@@ -310,24 +302,18 @@ class MainActivity : Activity() {
         val column = channelColumn ?: return
         column.removeAllViews()
 
-        column.addView(
-            makeText("$currentCountry KANALLARI")
-        )
+        column.addView(makeText("$currentCountry KANALLARI"))
 
-        val available =
-            channelsForCountry(currentCountry)
+        val available = channelsForCountry(currentCountry)
 
         available.forEachIndexed { index, channel ->
-
             val item = TextView(this).apply {
                 text = "${index + 1}. ${channel.name}"
                 textSize = 19f
                 setTextColor(0xFFFFFFFF.toInt())
                 setPadding(14, 18, 14, 18)
                 isFocusable = true
-                setBackgroundResource(
-                    R.drawable.nav_item_background
-                )
+                setBackgroundResource(R.drawable.nav_item_background)
 
                 setOnClickListener {
                     openVideo(index)
@@ -367,16 +353,13 @@ class MainActivity : Activity() {
         }
 
         available.forEachIndexed { index, channel ->
-
             val item = TextView(this).apply {
                 text = "${index + 1}. ${channel.name}"
                 textSize = 19f
                 setTextColor(0xFFFFFFFF.toInt())
                 setPadding(16, 18, 16, 18)
                 isFocusable = true
-                setBackgroundResource(
-                    R.drawable.nav_item_background
-                )
+                setBackgroundResource(R.drawable.nav_item_background)
 
                 setOnClickListener {
                     openVideo(index)
@@ -401,8 +384,7 @@ class MainActivity : Activity() {
 
     private fun removeChannelList() {
         channelList?.let {
-            (it.parent as? LinearLayout)
-                ?.removeView(it)
+            (it.parent as? LinearLayout)?.removeView(it)
         }
 
         channelList = null
@@ -447,18 +429,14 @@ class MainActivity : Activity() {
             )
         )
 
-        val exoPlayer =
-            ExoPlayer.Builder(this).build()
+        val exoPlayer = ExoPlayer.Builder(this).build()
 
         player = exoPlayer
         videoView.player = exoPlayer
 
         exoPlayer.addListener(
             object : Player.Listener {
-
-                override fun onPlayerError(
-                    error: PlaybackException
-                ) {
+                override fun onPlayerError(error: PlaybackException) {
                     Toast.makeText(
                         this@MainActivity,
                         "Yayın açılamadı",
@@ -484,9 +462,7 @@ class MainActivity : Activity() {
             player?.apply {
                 stop()
                 clearMediaItems()
-                setMediaItem(
-                    MediaItem.fromUri(channel.url)
-                )
+                setMediaItem(MediaItem.fromUri(channel.url))
                 prepare()
                 playWhenReady = true
             }
@@ -551,20 +527,16 @@ class MainActivity : Activity() {
         )
 
         channelPanel = panel
-
         panel.addView(makeText("KANALLAR"))
 
         available.forEachIndexed { index, channel ->
-
             val item = TextView(this).apply {
                 text = "${index + 1}. ${channel.name}"
                 textSize = 19f
                 setTextColor(0xFFFFFFFF.toInt())
                 setPadding(14, 20, 14, 20)
                 isFocusable = true
-                setBackgroundResource(
-                    R.drawable.nav_item_background
-                )
+                setBackgroundResource(R.drawable.nav_item_background)
 
                 setOnClickListener {
                     playChannel(index)
@@ -575,14 +547,12 @@ class MainActivity : Activity() {
             panel.addView(item)
         }
 
-        panel.getChildAt(currentChannel + 1)
-            ?.requestFocus()
+        panel.getChildAt(currentChannel + 1)?.requestFocus()
     }
 
     private fun hideSideChannels() {
         channelPanel?.let {
-            (it.parent as? FrameLayout)
-                ?.removeView(it)
+            (it.parent as? FrameLayout)?.removeView(it)
         }
 
         channelPanel = null
@@ -596,23 +566,18 @@ class MainActivity : Activity() {
         player = null
 
         videoScreen?.let {
-            (it.parent as? FrameLayout)
-                ?.removeView(it)
+            (it.parent as? FrameLayout)?.removeView(it)
         }
 
         videoScreen = null
     }
 
-    override fun dispatchKeyEvent(
-        event: KeyEvent
-    ): Boolean {
-
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (
             event.action == KeyEvent.ACTION_DOWN &&
             videoScreen != null
         ) {
             when (event.keyCode) {
-
                 KeyEvent.KEYCODE_DPAD_LEFT,
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
                     showSideChannels()
