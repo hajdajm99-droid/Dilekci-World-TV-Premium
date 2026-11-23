@@ -17,6 +17,8 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.dilekci.worldtv.databinding.ActivityMainBinding
+import java.text.Collator
+import java.util.Locale
 
 class MainActivity : Activity() {
 
@@ -61,14 +63,20 @@ class MainActivity : Activity() {
             "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8",
             "Almanya",
             "🌍 Dünya TV"
+        ),
+        Channel(
+            "France 24 English",
+            "https://live.france24.com/hls/live/2037218/F24_EN_HI_HLS/master_2300.m3u8",
+            "Fransa",
+            "🌍 Dünya TV"
         )
     )
 
     private val countries = listOf(
-        Country("Almanya", "🇩🇪")
+        Country("Almanya", "🇩🇪"),
+        Country("Fransa", "🇫🇷")
     )
 
-    private var countryContainer: LinearLayout? = null
     private var countryColumn: LinearLayout? = null
     private var channelColumn: LinearLayout? = null
 
@@ -86,9 +94,15 @@ class MainActivity : Activity() {
     }
 
     private fun visibleCountries(): List<Country> {
+        val collator = Collator.getInstance(
+            Locale("tr", "TR")
+        )
+
         return countries.filter {
             channelsForCountry(it.name).isNotEmpty()
-        }.sortedBy { it.name }
+        }.sortedWith { a, b ->
+            collator.compare(a.name, b.name)
+        }
     }
 
     private fun activeChannels(): List<Channel> {
@@ -200,11 +214,10 @@ class MainActivity : Activity() {
         )
 
         parent.addView(container)
+        channelList = container
 
-        countryContainer = container
         countryColumn = countriesList
         channelColumn = channelsList
-        channelList = container
 
         val availableCountries = visibleCountries()
 
@@ -248,10 +261,9 @@ class MainActivity : Activity() {
         val column = channelColumn ?: return
         column.removeAllViews()
 
-        val heading = makeText(
-            "$currentCountry KANALLARI"
+        column.addView(
+            makeText("$currentCountry KANALLARI")
         )
-        column.addView(heading)
 
         val available =
             channelsForCountry(currentCountry)
@@ -345,7 +357,6 @@ class MainActivity : Activity() {
         }
 
         channelList = null
-        countryContainer = null
         countryColumn = null
         channelColumn = null
     }
@@ -457,7 +468,6 @@ class MainActivity : Activity() {
                 "Yayın duraklatıldı",
                 Toast.LENGTH_SHORT
             ).show()
-
         } else {
             exoPlayer.play()
 
@@ -482,12 +492,10 @@ class MainActivity : Activity() {
             setBackgroundColor(0xEE192638.toInt())
         }
 
-        val width = dp(280)
-
         screen.addView(
             panel,
             FrameLayout.LayoutParams(
-                width,
+                dp(280),
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 Gravity.START
             )
@@ -495,8 +503,7 @@ class MainActivity : Activity() {
 
         channelPanel = panel
 
-        val heading = makeText("KANALLAR")
-        panel.addView(heading)
+        panel.addView(makeText("KANALLAR"))
 
         available.forEachIndexed { index, channel ->
 
