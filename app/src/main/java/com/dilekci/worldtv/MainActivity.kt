@@ -75,10 +75,17 @@ class MainActivity : Activity() {
             "https://linear901-oo-hls0-prd-gtm.delivery.skycdp.com/17501/sde-fast-skynews/master.m3u8",
             "İngiltere",
             "🌍 Dünya TV"
+        ),
+        Channel(
+            "CBS News 24/7",
+            "https://cbsn-us.cbsnstream.cbsnews.com/out/v1/55a8648e8f134e82a470f83d562deeca/master.m3u8",
+            "ABD",
+            "🌍 Dünya TV"
         )
     )
 
     private val countries = listOf(
+        Country("ABD", "🇺🇸"),
         Country("Almanya", "🇩🇪"),
         Country("Fransa", "🇫🇷"),
         Country("İngiltere", "🇬🇧")
