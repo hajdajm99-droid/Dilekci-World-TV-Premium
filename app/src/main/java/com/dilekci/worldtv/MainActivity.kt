@@ -107,9 +107,9 @@ class MainActivity : Activity() {
             "🌍 Dünya TV"
         ),
         Channel(
-            "Canal Sur Andalucía",
-            "https://d4oe4cnrgi9c9.cloudfront.net/master.m3u8",
-            "İspanya",
+            "Rai News 24",
+            "https://8e7439fdb1694c8da3a0fd63e4dda518.msvdn.net/rainews1/hls/playlist_mo.m3u8",
+            "İtalya",
             "🌍 Dünya TV"
         )
     )
@@ -121,7 +121,7 @@ class MainActivity : Activity() {
         Country("Fransa", "🇫🇷"),
         Country("Güney Kore", "🇰🇷"),
         Country("İngiltere", "🇬🇧"),
-        Country("İspanya", "🇪🇸"),
+        Country("İtalya", "🇮🇹"),
         Country("Japonya", "🇯🇵"),
         Country("Kanada", "🇨🇦")
     )
