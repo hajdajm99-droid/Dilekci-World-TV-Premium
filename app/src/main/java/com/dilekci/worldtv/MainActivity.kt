@@ -81,6 +81,12 @@ class MainActivity : Activity() {
             "https://cbsn-us.cbsnstream.cbsnews.com/out/v1/55a8648e8f134e82a470f83d562deeca/master.m3u8",
             "ABD",
             "🌍 Dünya TV"
+        ),
+        Channel(
+            "Savoir Média",
+            "https://hls.savoir.media/live/stream.m3u8",
+            "Kanada",
+            "🌍 Dünya TV"
         )
     )
 
@@ -88,7 +94,8 @@ class MainActivity : Activity() {
         Country("ABD", "🇺🇸"),
         Country("Almanya", "🇩🇪"),
         Country("Fransa", "🇫🇷"),
-        Country("İngiltere", "🇬🇧")
+        Country("İngiltere", "🇬🇧"),
+        Country("Kanada", "🇨🇦")
     )
 
     private var countryColumn: LinearLayout? = null
