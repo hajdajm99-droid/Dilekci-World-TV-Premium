@@ -99,6 +99,12 @@ class MainActivity : Activity() {
             "https://media-tyo.hls.nhkworld.jp/hls/w/live/master.m3u8",
             "Japonya",
             "🌍 Dünya TV"
+        ),
+        Channel(
+            "Arirang TV",
+            "https://amdlive-ch01-ctnd-com.akamaized.net/arirang_1ch/smil:arirang_1ch.smil/playlist.m3u8",
+            "Güney Kore",
+            "🌍 Dünya TV"
         )
     )
 
@@ -107,6 +113,7 @@ class MainActivity : Activity() {
         Country("Almanya", "🇩🇪"),
         Country("Avustralya", "🇦🇺"),
         Country("Fransa", "🇫🇷"),
+        Country("Güney Kore", "🇰🇷"),
         Country("İngiltere", "🇬🇧"),
         Country("Japonya", "🇯🇵"),
         Country("Kanada", "🇨🇦")
