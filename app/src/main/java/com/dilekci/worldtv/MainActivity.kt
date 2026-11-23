@@ -27,13 +27,20 @@ class MainActivity : Activity() {
     private var channelPanel: LinearLayout? = null
     private var channelList: View? = null
 
-    private var currentCategory = "Dünya TV"
+    private var currentCategory = "🌍 Dünya TV"
+    private var currentCountry = "Almanya"
     private var currentChannel = 0
 
     private data class Channel(
         val name: String,
         val url: String,
+        val country: String,
         val category: String
+    )
+
+    private data class Country(
+        val name: String,
+        val flag: String
     )
 
     private val categories = listOf(
@@ -52,13 +59,45 @@ class MainActivity : Activity() {
         Channel(
             "DW English",
             "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8",
+            "Almanya",
             "🌍 Dünya TV"
         )
     )
 
-    private fun channelsFor(category: String): List<Channel> {
+    private val countries = listOf(
+        Country("Almanya", "🇩🇪")
+    )
+
+    private var countryContainer: LinearLayout? = null
+    private var countryColumn: LinearLayout? = null
+    private var channelColumn: LinearLayout? = null
+
+    private fun dp(value: Int): Int {
+        return (value * resources.displayMetrics.density).toInt()
+    }
+
+    private fun channelsForCountry(
+        country: String
+    ): List<Channel> {
         return channels.filter {
-            it.category == category
+            it.country == country &&
+                it.category == "🌍 Dünya TV"
+        }
+    }
+
+    private fun visibleCountries(): List<Country> {
+        return countries.filter {
+            channelsForCountry(it.name).isNotEmpty()
+        }.sortedBy { it.name }
+    }
+
+    private fun activeChannels(): List<Channel> {
+        return if (currentCategory == "🌍 Dünya TV") {
+            channelsForCountry(currentCountry)
+        } else {
+            channels.filter {
+                it.category == currentCategory
+            }
         }
     }
 
@@ -72,10 +111,6 @@ class MainActivity : Activity() {
 
         binding.primaryAction.visibility = View.GONE
         binding.secondaryAction.visibility = View.GONE
-
-        binding.contentTitle.text = "KANALLAR"
-        binding.contentDescription.text =
-            "Soldan kategori seçin."
 
         categories.forEach { category ->
 
@@ -109,17 +144,151 @@ class MainActivity : Activity() {
 
         currentCategory = category
         binding.sectionTitle.text = category
-        binding.contentTitle.text = "KANAL LİSTESİ"
 
-        val available = channelsFor(category)
+        if (category == "🌍 Dünya TV") {
+            showWorldTV()
+        } else {
+            showOtherCategory(category)
+        }
+    }
+
+    private fun showWorldTV() {
+        binding.contentTitle.text = "DÜNYA TV"
+        binding.contentDescription.text =
+            "Ülke seçin, kanalları sağda görün."
+
+        val parent =
+            binding.contentDescription.parent as LinearLayout
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(16), 0, 0)
+        }
+
+        val countriesList = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        val channelsList = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        val countriesScroll = ScrollView(this).apply {
+            addView(countriesList)
+        }
+
+        val channelsScroll = ScrollView(this).apply {
+            addView(channelsList)
+        }
+
+        container.addView(
+            countriesScroll,
+            LinearLayout.LayoutParams(
+                0,
+                dp(360),
+                1f
+            )
+        )
+
+        container.addView(
+            channelsScroll,
+            LinearLayout.LayoutParams(
+                0,
+                dp(360),
+                1.5f
+            )
+        )
+
+        parent.addView(container)
+
+        countryContainer = container
+        countryColumn = countriesList
+        channelColumn = channelsList
+        channelList = container
+
+        val availableCountries = visibleCountries()
+
+        availableCountries.forEach { country ->
+
+            val item = TextView(this).apply {
+                text = "${country.flag} ${country.name}"
+                textSize = 19f
+                setTextColor(0xFFFFFFFF.toInt())
+                setPadding(12, 18, 12, 18)
+                isFocusable = true
+                setBackgroundResource(
+                    R.drawable.nav_item_background
+                )
+
+                setOnClickListener {
+                    currentCountry = country.name
+                    showCountryChannels()
+                }
+            }
+
+            countriesList.addView(item)
+        }
+
+        if (availableCountries.isNotEmpty()) {
+            if (availableCountries.none {
+                    it.name == currentCountry
+                }) {
+                currentCountry = availableCountries.first().name
+            }
+
+            showCountryChannels()
+        } else {
+            channelsList.addView(
+                makeText("Henüz ülke kanalı eklenmedi.")
+            )
+        }
+    }
+
+    private fun showCountryChannels() {
+        val column = channelColumn ?: return
+        column.removeAllViews()
+
+        val heading = makeText(
+            "$currentCountry KANALLARI"
+        )
+        column.addView(heading)
+
+        val available =
+            channelsForCountry(currentCountry)
+
+        available.forEachIndexed { index, channel ->
+
+            val item = TextView(this).apply {
+                text = "${index + 1}. ${channel.name}"
+                textSize = 19f
+                setTextColor(0xFFFFFFFF.toInt())
+                setPadding(14, 18, 14, 18)
+                isFocusable = true
+                setBackgroundResource(
+                    R.drawable.nav_item_background
+                )
+
+                setOnClickListener {
+                    openVideo(index)
+                }
+            }
+
+            column.addView(item)
+        }
+    }
+
+    private fun showOtherCategory(category: String) {
+        binding.contentTitle.text = category
+
+        val available = activeChannels()
 
         if (available.isEmpty()) {
             binding.contentDescription.text =
                 when (category) {
                     "📡 IPTV" ->
-                        "Xtream Codes, M3U URL ve dosya ekleme sonraki aşamada hazırlanacak."
+                        "Xtream Codes, M3U URL ve dosya desteği sonraki aşamada eklenecek."
                     "⭐ Favoriler" ->
-                        "Favori kanal kaydetme sonraki aşamada eklenecek."
+                        "Favoriler özelliği sonraki aşamada eklenecek."
                     else ->
                         "Bu kategoriye henüz yayın eklenmedi."
                 }
@@ -129,31 +298,20 @@ class MainActivity : Activity() {
         binding.contentDescription.text =
             "${available.size} kanal bulundu."
 
-        showChannels(available)
-    }
-
-    private fun showChannels(
-        available: List<Channel>
-    ) {
         val parent =
             binding.contentDescription.parent as LinearLayout
 
-        val scroll = ScrollView(this).apply {
-            isFillViewport = false
-        }
-
         val list = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, 16, 0, 0)
         }
 
         available.forEachIndexed { index, channel ->
 
             val item = TextView(this).apply {
                 text = "${index + 1}. ${channel.name}"
-                textSize = 21f
+                textSize = 19f
                 setTextColor(0xFFFFFFFF.toInt())
-                setPadding(20, 20, 20, 20)
+                setPadding(16, 18, 16, 18)
                 isFocusable = true
                 setBackgroundResource(
                     R.drawable.nav_item_background
@@ -167,9 +325,17 @@ class MainActivity : Activity() {
             list.addView(item)
         }
 
-        scroll.addView(list)
-        parent.addView(scroll)
-        channelList = scroll
+        parent.addView(list)
+        channelList = list
+    }
+
+    private fun makeText(value: String): TextView {
+        return TextView(this).apply {
+            text = value
+            textSize = 19f
+            setTextColor(0xFFFFFFFF.toInt())
+            setPadding(12, 16, 12, 16)
+        }
     }
 
     private fun removeChannelList() {
@@ -177,11 +343,15 @@ class MainActivity : Activity() {
             (it.parent as? LinearLayout)
                 ?.removeView(it)
         }
+
         channelList = null
+        countryContainer = null
+        countryColumn = null
+        channelColumn = null
     }
 
     private fun openVideo(index: Int) {
-        val available = channelsFor(currentCategory)
+        val available = activeChannels()
 
         if (index !in available.indices) return
 
@@ -225,6 +395,7 @@ class MainActivity : Activity() {
 
         exoPlayer.addListener(
             object : Player.Listener {
+
                 override fun onPlayerError(
                     error: PlaybackException
                 ) {
@@ -242,7 +413,7 @@ class MainActivity : Activity() {
     }
 
     private fun playChannel(index: Int) {
-        val available = channelsFor(currentCategory)
+        val available = activeChannels()
 
         if (index !in available.indices) return
 
@@ -275,12 +446,35 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun togglePlayback() {
+        val exoPlayer = player ?: return
+
+        if (exoPlayer.isPlaying) {
+            exoPlayer.pause()
+
+            Toast.makeText(
+                this,
+                "Yayın duraklatıldı",
+                Toast.LENGTH_SHORT
+            ).show()
+
+        } else {
+            exoPlayer.play()
+
+            Toast.makeText(
+                this,
+                "Yayın devam ediyor",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
     private fun showSideChannels() {
         val screen = videoScreen ?: return
 
         if (channelPanel != null) return
 
-        val available = channelsFor(currentCategory)
+        val available = activeChannels()
 
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -288,9 +482,7 @@ class MainActivity : Activity() {
             setBackgroundColor(0xEE192638.toInt())
         }
 
-        val width =
-            (280 * resources.displayMetrics.density)
-                .toInt()
+        val width = dp(280)
 
         screen.addView(
             panel,
@@ -303,13 +495,7 @@ class MainActivity : Activity() {
 
         channelPanel = panel
 
-        val heading = TextView(this).apply {
-            text = "KANALLAR"
-            textSize = 22f
-            setTextColor(0xFFFFFFFF.toInt())
-            setPadding(12, 12, 12, 24)
-        }
-
+        val heading = makeText("KANALLAR")
         panel.addView(heading)
 
         available.forEachIndexed { index, channel ->
@@ -375,6 +561,14 @@ class MainActivity : Activity() {
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
                     showSideChannels()
                     return true
+                }
+
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER -> {
+                    if (channelPanel == null) {
+                        togglePlayback()
+                        return true
+                    }
                 }
 
                 KeyEvent.KEYCODE_BACK -> {
