@@ -69,12 +69,19 @@ class MainActivity : Activity() {
             "https://live.france24.com/hls/live/2037218/F24_EN_HI_HLS/master_2300.m3u8",
             "Fransa",
             "🌍 Dünya TV"
+        ),
+        Channel(
+            "Sky News",
+            "https://linear901-oo-hls0-prd-gtm.delivery.skycdp.com/17501/sde-fast-skynews/master.m3u8",
+            "İngiltere",
+            "🌍 Dünya TV"
         )
     )
 
     private val countries = listOf(
         Country("Almanya", "🇩🇪"),
-        Country("Fransa", "🇫🇷")
+        Country("Fransa", "🇫🇷"),
+        Country("İngiltere", "🇬🇧")
     )
 
     private var countryColumn: LinearLayout? = null
