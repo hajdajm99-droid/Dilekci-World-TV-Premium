@@ -2,16 +2,19 @@ package com.dilekci.worldtv
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -20,6 +23,7 @@ import com.dilekci.worldtv.databinding.ActivityMainBinding
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URL
+import java.net.URLEncoder
 import java.text.Collator
 import java.util.Locale
 
@@ -29,6 +33,7 @@ class MainActivity : Activity() {
 
     private val world = "🌍 Dünya TV"
     private val trial = "🧪 Dünya TV Deneme"
+    private val iptv = "📡 IPTV"
 
     private var player: ExoPlayer? = null
     private var videoScreen: FrameLayout? = null
@@ -42,12 +47,16 @@ class MainActivity : Activity() {
 
     private var loading = false
     private var loaded = false
+    private var iptvLoading = false
     private var playbackConfirmed = false
+
+    private val iptvFileRequest = 501
 
     private data class Channel(
         val name: String,
         val url: String,
-        val country: String
+        val country: String,
+        val hls: Boolean = false
     )
 
     private val categories = listOf(
@@ -60,7 +69,7 @@ class MainActivity : Activity() {
         "⚽ Spor",
         "📰 Haber",
         "⭐ Favoriler",
-        "📡 IPTV"
+        iptv
     )
 
     private val channels = mutableListOf(
@@ -138,10 +147,10 @@ class MainActivity : Activity() {
 
     private val trialChannels = mutableListOf<Channel>()
     private val savedChannels = mutableListOf<Channel>()
+    private val iptvChannels = mutableListOf<Channel>()
 
     private val turkish = Locale("tr", "TR")
-    private val countryCodes =
-        Locale.getISOCountries().toSet()
+    private val countryCodes = Locale.getISOCountries().toSet()
 
     private val allowedChannels = mapOf(
         "TR" to setOf(
@@ -159,9 +168,7 @@ class MainActivity : Activity() {
             "France 24 Spanish",
             "Franceinfo"
         ),
-        "GB" to setOf(
-            "Sky News", "BBC News"
-        ),
+        "GB" to setOf("Sky News", "BBC News"),
         "US" to setOf(
             "CBS News", "CBS News 24/7",
             "ABC News Live", "NBC News NOW",
@@ -178,18 +185,13 @@ class MainActivity : Activity() {
             "NHK WORLD-JAPAN", "NHK World Japan"
         ),
         "KR" to setOf(
-            "Arirang TV", "Arirang World",
-            "KBS World"
+            "Arirang TV", "Arirang World", "KBS World"
         ),
-        "AT" to setOf(
-            "oe24 TV", "W24", "Tirol TV"
-        ),
+        "AT" to setOf("oe24 TV", "W24", "Tirol TV"),
         "CH" to setOf("SRF info"),
         "IT" to setOf("Rai News 24"),
         "ES" to setOf("Canal 24 Horas", "24h"),
-        "PT" to setOf(
-            "RTP Notícias", "RTP Internacional"
-        ),
+        "PT" to setOf("RTP Notícias", "RTP Internacional"),
         "MX" to setOf("Canal Once", "Canal 22"),
         "RO" to setOf("TVR International", "TVR Info"),
         "GR" to setOf("ERT News", "ERT World"),
@@ -212,9 +214,13 @@ class MainActivity : Activity() {
     )
 
     private fun dp(value: Int): Int {
-        return (
-            value * resources.displayMetrics.density
-        ).toInt()
+        return (value * resources.displayMetrics.density).toInt()
+    }
+
+    private fun toast(message: String) {
+        Toast.makeText(
+            this, message, Toast.LENGTH_SHORT
+        ).show()
     }
 
     private fun countryName(code: String): String {
@@ -222,8 +228,7 @@ class MainActivity : Activity() {
             "US" -> "ABD"
             "GB" -> "İngiltere"
             "KR" -> "Güney Kore"
-            else -> Locale("", code)
-                .getDisplayCountry(turkish)
+            else -> Locale("", code).getDisplayCountry(turkish)
         }
     }
 
@@ -239,33 +244,16 @@ class MainActivity : Activity() {
         }.joinToString("")
     }
 
-    private fun toast(message: String) {
-        Toast.makeText(
-            this,
-            message,
-            Toast.LENGTH_SHORT
-        ).show()
-    }
-
-    private fun sameChannel(
-        a: Channel,
-        b: Channel
-    ): Boolean {
+    private fun sameChannel(a: Channel, b: Channel): Boolean {
         return a.url == b.url ||
-            (
-                a.country == b.country &&
-                a.name.equals(
-                    b.name,
-                    ignoreCase = true
-                )
-            )
+            (a.country == b.country &&
+                a.name.equals(b.name, ignoreCase = true))
     }
 
     private fun loadSavedChannels() {
         try {
             val prefs = getSharedPreferences(
-                "world_tv_saved",
-                MODE_PRIVATE
+                "world_tv_saved", MODE_PRIVATE
             )
 
             val array = JSONArray(
@@ -284,25 +272,19 @@ class MainActivity : Activity() {
                 if (
                     channel.country in countryCodes &&
                     channel.url.startsWith("https://") &&
-                    channels.none {
-                        sameChannel(it, channel)
-                    }
+                    channels.none { sameChannel(it, channel) }
                 ) {
                     channels.add(channel)
                     savedChannels.add(channel)
                 }
             }
-
         } catch (e: Exception) {
             toast("Kayıtlı kanallar okunamadı")
         }
     }
 
     private fun saveChannel(channel: Channel) {
-
-        if (channels.any {
-                sameChannel(it, channel)
-            }) {
+        if (channels.any { sameChannel(it, channel) }) {
             toast("Bu kanal zaten kayıtlı")
             return
         }
@@ -310,18 +292,16 @@ class MainActivity : Activity() {
         val array = JSONArray()
 
         (savedChannels + channel).forEach {
-            val item = JSONObject()
-
-            item.put("name", it.name)
-            item.put("url", it.url)
-            item.put("country", it.country)
-
-            array.put(item)
+            array.put(
+                JSONObject()
+                    .put("name", it.name)
+                    .put("url", it.url)
+                    .put("country", it.country)
+            )
         }
 
         val success = getSharedPreferences(
-            "world_tv_saved",
-            MODE_PRIVATE
+            "world_tv_saved", MODE_PRIVATE
         ).edit()
             .putString("channels", array.toString())
             .commit()
@@ -332,7 +312,7 @@ class MainActivity : Activity() {
 
             toast(
                 "${flag(channel.country)} " +
-                    "${channel.name} Dünya TV'ye eklendi"
+                "${channel.name} Dünya TV'ye eklendi"
             )
         } else {
             toast("Kanal kaydedilemedi")
@@ -340,6 +320,11 @@ class MainActivity : Activity() {
     }
 
     private fun confirmSaveChannel() {
+
+        if (currentCategory == iptv) {
+            toast("Bu kanal IPTV listesinde kayıtlı")
+            return
+        }
 
         if (currentCategory != trial) {
             toast("Bu kanal zaten Dünya TV bölümünde")
@@ -354,9 +339,7 @@ class MainActivity : Activity() {
             return
         }
 
-        if (channels.any {
-                sameChannel(it, channel)
-            }) {
+        if (channels.any { sameChannel(it, channel) }) {
             toast("Bu kanal zaten kayıtlı")
             return
         }
@@ -365,10 +348,10 @@ class MainActivity : Activity() {
             .setTitle("Dünya TV'ye ekle")
             .setMessage(
                 "${flag(channel.country)} " +
-                    "${countryName(channel.country)}\n\n" +
-                    "${channel.name}\n\n" +
-                    "Yayının çalıştığını ve kullanımına " +
-                    "izin verildiğini doğruluyor musunuz?"
+                "${countryName(channel.country)}\n\n" +
+                "${channel.name}\n\n" +
+                "Yayının çalıştığını ve kullanımına " +
+                "izin verildiğini doğruluyor musunuz?"
             )
             .setPositiveButton("Kaydet") { _, _ ->
                 saveChannel(channel)
@@ -389,13 +372,11 @@ class MainActivity : Activity() {
         )
 
         for (part in group.split(";")) {
+
             val name = part.trim()
 
             aliases.entries.firstOrNull {
-                it.key.equals(
-                    name,
-                    ignoreCase = true
-                )
+                it.key.equals(name, ignoreCase = true)
             }?.let {
                 return it.value
             }
@@ -417,10 +398,7 @@ class MainActivity : Activity() {
 
     private fun normalizeName(name: String): String {
         return name
-            .replace(
-                Regex("""\s*\(\d+p\)\s*"""),
-                " "
-            )
+            .replace(Regex("""\s*\(\d+p\)\s*"""), " ")
             .replace(Regex("""\s+"""), " ")
             .trim()
     }
@@ -432,13 +410,8 @@ class MainActivity : Activity() {
         var name = ""
         var country: String? = null
 
-        val groupRegex = Regex(
-            """group-title="([^"]*)""""
-        )
-
-        val nameRegex = Regex(
-            """tvg-name="([^"]*)""""
-        )
+        val groupRegex = Regex("group-title=\"([^\"]*)\"")
+        val nameRegex = Regex("tvg-name=\"([^\"]*)\"")
 
         text.lineSequence().forEach { raw ->
 
@@ -465,22 +438,16 @@ class MainActivity : Activity() {
 
                 val code = country
 
-                val allowed =
-                    allowedChannels[code]?.any {
-                        it.equals(
-                            name,
-                            ignoreCase = true
-                        )
-                    } == true
+                val allowed = allowedChannels[code]?.any {
+                    it.equals(name, ignoreCase = true)
+                } == true
 
                 if (
                     code != null &&
                     allowed &&
                     line.startsWith("https://")
                 ) {
-                    result.add(
-                        Channel(name, line, code)
-                    )
+                    result.add(Channel(name, line, code))
                 }
 
                 name = ""
@@ -540,9 +507,7 @@ class MainActivity : Activity() {
                     if (parsed.isEmpty()) {
                         toast("Uygun deneme kanalı bulunamadı")
                     } else {
-                        toast(
-                            "${parsed.size} deneme kanalı bulundu"
-                        )
+                        toast("${parsed.size} deneme kanalı bulundu")
                     }
                 }
 
@@ -570,13 +535,12 @@ class MainActivity : Activity() {
         return when (currentCategory) {
             world -> channels
             trial -> trialChannels
+            iptv -> iptvChannels
             else -> emptyList()
         }
     }
 
-    private fun channelsForCountry(
-        country: String
-    ): List<Channel> {
+    private fun channelsForCountry(country: String): List<Channel> {
         return sourceChannels().filter {
             it.country == country
         }
@@ -591,14 +555,17 @@ class MainActivity : Activity() {
             .distinct()
             .sortedWith { a, b ->
                 collator.compare(
-                    countryName(a),
-                    countryName(b)
+                    countryName(a), countryName(b)
                 )
             }
     }
 
     private fun activeChannels(): List<Channel> {
-        return channelsForCountry(currentCountry)
+        return if (currentCategory == iptv) {
+            iptvChannels
+        } else {
+            channelsForCountry(currentCountry)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -606,10 +573,10 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
 
         binding = ActivityMainBinding.inflate(layoutInflater)
-
         setContentView(binding.root)
 
         loadSavedChannels()
+        loadIptvChannels()
 
         binding.sectionContainer.removeAllViews()
 
@@ -639,33 +606,32 @@ class MainActivity : Activity() {
         removeChannelList()
 
         currentCategory = category
-
         binding.sectionTitle.text = category
 
-        if (category == world || category == trial) {
+        when (category) {
 
-            showWorldTV()
+            world, trial -> {
 
-            if (category == trial && !loaded) {
-                loadTrialChannels()
+                showWorldTV()
+
+                if (category == trial && !loaded) {
+                    loadTrialChannels()
+                }
             }
 
-        } else {
+            iptv -> showIptv()
 
-            binding.contentTitle.text = category
+            else -> {
 
-            binding.contentDescription.text =
-                when (category) {
-                    "📡 IPTV" ->
-                        "Xtream Codes, M3U URL ve dosya " +
-                        "desteği sonraki aşamada eklenecek."
+                binding.contentTitle.text = category
 
-                    "⭐ Favoriler" ->
+                binding.contentDescription.text =
+                    if (category == "⭐ Favoriler") {
                         "Favoriler sonraki aşamada eklenecek."
-
-                    else ->
+                    } else {
                         "Bu kategoriye henüz yayın eklenmedi."
-                }
+                    }
+            }
         }
     }
 
@@ -718,16 +684,12 @@ class MainActivity : Activity() {
 
         container.addView(
             countriesScroll,
-            LinearLayout.LayoutParams(
-                0, dp(360), 1f
-            )
+            LinearLayout.LayoutParams(0, dp(360), 1f)
         )
 
         container.addView(
             channelsScroll,
-            LinearLayout.LayoutParams(
-                0, dp(360), 1.5f
-            )
+            LinearLayout.LayoutParams(0, dp(360), 1.5f)
         )
 
         parent.addView(container)
@@ -760,7 +722,6 @@ class MainActivity : Activity() {
             showCountryChannels()
 
         } else {
-
             channelsList.addView(
                 makeText("Henüz kanal bulunamadı.")
             )
@@ -774,9 +735,7 @@ class MainActivity : Activity() {
         column.removeAllViews()
 
         column.addView(
-            makeText(
-                "${countryName(currentCountry)} KANALLARI"
-            )
+            makeText("${countryName(currentCountry)} KANALLARI")
         )
 
         channelsForCountry(currentCountry)
@@ -799,7 +758,6 @@ class MainActivity : Activity() {
         return TextView(this).apply {
             text = value
             textSize = 19f
-
             setTextColor(0xFFFFFFFF.toInt())
             setPadding(12, 16, 12, 16)
         }
@@ -812,10 +770,8 @@ class MainActivity : Activity() {
 
         return makeText(value).apply {
             textSize = size
-
             isFocusable = true
             isClickable = true
-
             setPadding(14, 18, 14, 18)
 
             setBackgroundResource(
@@ -844,7 +800,6 @@ class MainActivity : Activity() {
 
         val screen = FrameLayout(this).apply {
             setBackgroundColor(0xFF000000.toInt())
-
             isFocusable = true
             isFocusableInTouchMode = true
         }
@@ -872,8 +827,7 @@ class MainActivity : Activity() {
             )
         )
 
-        val exoPlayer =
-            ExoPlayer.Builder(this).build()
+        val exoPlayer = ExoPlayer.Builder(this).build()
 
         player = exoPlayer
         videoView.player = exoPlayer
@@ -899,7 +853,6 @@ class MainActivity : Activity() {
         )
 
         playChannel(index)
-
         screen.requestFocus()
     }
 
@@ -913,21 +866,23 @@ class MainActivity : Activity() {
 
         try {
 
+            val media = MediaItem.Builder()
+                .setUri(channel.url)
+
+            if (channel.hls) {
+                media.setMimeType(MimeTypes.APPLICATION_M3U8)
+            }
+
             player?.apply {
+
                 stop()
                 clearMediaItems()
-
-                setMediaItem(
-                    MediaItem.fromUri(channel.url)
-                )
-
+                setMediaItem(media.build())
                 prepare()
                 playWhenReady = true
             }
 
-            toast(
-                "${index + 1}. ${channel.name} açılıyor"
-            )
+            toast("${index + 1}. ${channel.name} açılıyor")
 
         } catch (e: Exception) {
             toast("Kanal başlatılamadı")
@@ -939,12 +894,9 @@ class MainActivity : Activity() {
         val exoPlayer = player ?: return
 
         if (exoPlayer.playWhenReady) {
-
             exoPlayer.pause()
             toast("Yayın duraklatıldı")
-
         } else {
-
             exoPlayer.play()
             toast("Yayın devam ediyor")
         }
@@ -958,9 +910,7 @@ class MainActivity : Activity() {
 
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-
             setPadding(16, 24, 16, 24)
-
             setBackgroundColor(0xEE192638.toInt())
         }
 
@@ -1018,7 +968,6 @@ class MainActivity : Activity() {
         }
 
         channelPanel = null
-
         videoScreen?.requestFocus()
     }
 
@@ -1037,9 +986,527 @@ class MainActivity : Activity() {
         playbackConfirmed = false
     }
 
-    override fun dispatchKeyEvent(
-        event: KeyEvent
-    ): Boolean {
+    // IPTV KAYIT SİSTEMİ
+
+    private fun loadIptvChannels() {
+
+        iptvChannels.clear()
+
+        try {
+
+            val prefs = getSharedPreferences(
+                "iptv_saved", MODE_PRIVATE
+            )
+
+            val array = JSONArray(
+                prefs.getString("channels", "[]") ?: "[]"
+            )
+
+            for (i in 0 until array.length()) {
+
+                val item = array.getJSONObject(i)
+
+                iptvChannels.add(
+                    Channel(
+                        item.getString("name"),
+                        item.getString("url"),
+                        "IPTV",
+                        item.optBoolean("hls", false)
+                    )
+                )
+            }
+
+        } catch (e: Exception) {
+            toast("IPTV kayıtları okunamadı")
+        }
+    }
+
+    private fun saveIptvChannels(items: List<Channel>) {
+
+        if (items.isEmpty()) {
+            toast("IPTV kanalı bulunamadı")
+            return
+        }
+
+        val merged = (iptvChannels + items)
+            .distinctBy { it.url }
+
+        val array = JSONArray()
+
+        merged.forEach {
+
+            array.put(
+                JSONObject()
+                    .put("name", it.name)
+                    .put("url", it.url)
+                    .put("hls", it.hls)
+            )
+        }
+
+        val success = getSharedPreferences(
+            "iptv_saved", MODE_PRIVATE
+        ).edit()
+            .putString("channels", array.toString())
+            .commit()
+
+        if (!success) {
+            toast("IPTV listesi kaydedilemedi")
+            return
+        }
+
+        iptvChannels.clear()
+        iptvChannels.addAll(merged)
+
+        if (
+            currentCategory == iptv &&
+            videoScreen == null
+        ) {
+            removeChannelList()
+            showIptv()
+        }
+
+        toast("${iptvChannels.size} IPTV kanalı kayıtlı")
+    }
+
+    private fun parseIptv(
+        text: String,
+        base: String? = null
+    ): List<Channel> {
+
+        val result = mutableListOf<Channel>()
+
+        var name = ""
+
+        if (
+            text.contains("#EXT-X-TARGETDURATION") ||
+            text.contains("#EXT-X-STREAM-INF")
+        ) {
+
+            if (base != null) {
+                return listOf(
+                    Channel("HLS Yayını", base, "IPTV", true)
+                )
+            }
+
+            return emptyList()
+        }
+
+        text.lineSequence().forEach { raw ->
+
+            val line = raw.trim()
+                .removePrefix("\uFEFF")
+
+            if (line.startsWith("#EXTINF:")) {
+
+                name = line.substringAfterLast(",").trim()
+
+            } else if (
+                line.isNotBlank() &&
+                !line.startsWith("#")
+            ) {
+
+                val url = try {
+
+                    if (base != null) {
+                        URL(URL(base), line).toString()
+                    } else {
+                        line
+                    }
+
+                } catch (e: Exception) {
+                    line
+                }
+
+                if (
+                    url.startsWith("http://") ||
+                    url.startsWith("https://")
+                ) {
+
+                    result.add(
+                        Channel(
+                            name.ifBlank {
+                                "Kanal ${result.size + 1}"
+                            },
+                            url,
+                            "IPTV",
+                            url.substringBefore("?")
+                                .endsWith(".m3u8", true)
+                        )
+                    )
+                }
+
+                name = ""
+            }
+        }
+
+        return result.distinctBy { it.url }
+    }
+
+    private fun importIptvUrl(url: String) {
+
+        if (
+            !url.startsWith("http://") &&
+            !url.startsWith("https://")
+        ) {
+            toast("Geçerli bir HTTP veya HTTPS adresi girin")
+            return
+        }
+
+        if (iptvLoading) {
+            toast("Liste zaten yükleniyor")
+            return
+        }
+
+        iptvLoading = true
+
+        toast("IPTV listesi yükleniyor...")
+
+        Thread {
+            try {
+
+                val connection = URL(url).openConnection()
+
+                connection.connectTimeout = 20000
+                connection.readTimeout = 30000
+
+                val text = connection.getInputStream()
+                    .bufferedReader(Charsets.UTF_8)
+                    .use { it.readText() }
+
+                val items = parseIptv(
+                    text,
+                    connection.url.toString()
+                )
+
+                runOnUiThread {
+
+                    iptvLoading = false
+
+                    if (!isDestroyed && !isFinishing) {
+                        saveIptvChannels(items)
+                    }
+                }
+
+            } catch (e: Exception) {
+
+                runOnUiThread {
+
+                    iptvLoading = false
+
+                    if (!isDestroyed && !isFinishing) {
+                        toast("IPTV bağlantısı kurulamadı")
+                    }
+                }
+            }
+        }.start()
+    }
+
+    private fun iptvInput(hintText: String): EditText {
+
+        return EditText(this).apply {
+            hint = hintText
+            setSingleLine(true)
+            textSize = 18f
+        }
+    }
+
+    private fun showM3uDialog() {
+
+        val input = iptvInput("M3U veya M3U8 URL")
+
+        input.inputType =
+            android.text.InputType.TYPE_CLASS_TEXT or
+            android.text.InputType.TYPE_TEXT_VARIATION_URI
+
+        AlertDialog.Builder(this)
+            .setTitle("M3U URL Ekle")
+            .setView(input)
+            .setPositiveButton("Bağlan") { _, _ ->
+
+                importIptvUrl(
+                    input.text.toString().trim()
+                )
+            }
+            .setNegativeButton("İptal", null)
+            .show()
+    }
+
+    private fun showXtreamDialog() {
+
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(12))
+        }
+
+        val server = iptvInput("Sunucu URL")
+        val username = iptvInput("Kullanıcı adı")
+        val password = iptvInput("Şifre")
+
+        server.inputType =
+            android.text.InputType.TYPE_CLASS_TEXT or
+            android.text.InputType.TYPE_TEXT_VARIATION_URI
+
+        password.inputType =
+            android.text.InputType.TYPE_CLASS_TEXT or
+            android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+
+        layout.addView(server)
+        layout.addView(username)
+        layout.addView(password)
+
+        AlertDialog.Builder(this)
+            .setTitle("Xtream Codes")
+            .setView(layout)
+            .setPositiveButton("Bağlan") { _, _ ->
+
+                val host = server.text.toString()
+                    .trim()
+                    .trimEnd('/')
+
+                val user = username.text.toString().trim()
+                val pass = password.text.toString()
+
+                if (
+                    host.isBlank() ||
+                    user.isBlank() ||
+                    pass.isBlank()
+                ) {
+
+                    toast("Tüm alanları doldurun")
+
+                } else {
+
+                    val u = URLEncoder.encode(user, "UTF-8")
+                    val p = URLEncoder.encode(pass, "UTF-8")
+
+                    val url =
+                        "$host/get.php?username=$u" +
+                        "&password=$p&type=m3u_plus" +
+                        "&output=m3u8"
+
+                    importIptvUrl(url)
+                }
+            }
+            .setNegativeButton("İptal", null)
+            .show()
+    }
+
+    private fun selectIptvFile() {
+
+        try {
+
+            val intent = Intent(
+                Intent.ACTION_OPEN_DOCUMENT
+            ).apply {
+
+                addCategory(Intent.CATEGORY_OPENABLE)
+
+                type = "*/*"
+            }
+
+            startActivityForResult(
+                intent, iptvFileRequest
+            )
+
+        } catch (e: Exception) {
+            toast("Cihazda dosya seçici bulunamadı")
+        }
+    }
+
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: Intent?
+    ) {
+
+        super.onActivityResult(
+            requestCode, resultCode, data
+        )
+
+        if (
+            requestCode != iptvFileRequest ||
+            resultCode != RESULT_OK
+        ) return
+
+        val uri = data?.data ?: return
+
+        if (iptvLoading) {
+            toast("Liste zaten yükleniyor")
+            return
+        }
+
+        iptvLoading = true
+
+        Thread {
+
+            try {
+
+                val text = contentResolver
+                    .openInputStream(uri)
+                    ?.bufferedReader(Charsets.UTF_8)
+                    ?.use { it.readText() }
+                    ?: throw Exception()
+
+                val items = parseIptv(text)
+
+                runOnUiThread {
+
+                    iptvLoading = false
+
+                    if (!isDestroyed && !isFinishing) {
+                        saveIptvChannels(items)
+                    }
+                }
+
+            } catch (e: Exception) {
+
+                runOnUiThread {
+
+                    iptvLoading = false
+
+                    if (!isDestroyed && !isFinishing) {
+                        toast("IPTV dosyası okunamadı")
+                    }
+                }
+            }
+        }.start()
+    }
+
+    private fun showIptv() {
+
+        binding.contentTitle.text = "IPTV"
+
+        binding.contentDescription.text =
+            "${iptvChannels.size} kayıtlı IPTV kanalı"
+
+        val parent =
+            binding.contentDescription.parent as LinearLayout
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(16), 0, 0)
+        }
+
+        val menu = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        val menuScroll = ScrollView(this).apply {
+            addView(menu)
+        }
+
+        val listScroll = ScrollView(this).apply {
+            addView(list)
+        }
+
+        container.addView(
+            menuScroll,
+            LinearLayout.LayoutParams(0, dp(360), 1f)
+        )
+
+        container.addView(
+            listScroll,
+            LinearLayout.LayoutParams(0, dp(360), 1.5f)
+        )
+
+        val xtream = makeItem("🔑 Xtream Codes")
+
+        xtream.setOnClickListener {
+            showXtreamDialog()
+        }
+
+        val m3u = makeItem("🔗 M3U URL")
+
+        m3u.setOnClickListener {
+            showM3uDialog()
+        }
+
+        val file = makeItem("📂 M3U/M3U8 Dosyası")
+
+        file.setOnClickListener {
+            selectIptvFile()
+        }
+
+        menu.addView(xtream)
+        menu.addView(m3u)
+        menu.addView(file)
+
+        val clear = makeItem("🗑 IPTV Listesini Temizle")
+
+        clear.setOnClickListener {
+
+            if (iptvLoading) {
+                toast("Önce yüklemenin tamamlanmasını bekleyin")
+            } else {
+
+                AlertDialog.Builder(this)
+                    .setTitle("IPTV listesini sil")
+                    .setMessage(
+                        "Dünya TV kanalları silinmeyecek."
+                    )
+                    .setPositiveButton("Sil") { _, _ ->
+
+                        val success = getSharedPreferences(
+                            "iptv_saved", MODE_PRIVATE
+                        ).edit()
+                            .remove("channels")
+                            .commit()
+
+                        if (success) {
+
+                            iptvChannels.clear()
+
+                            removeChannelList()
+                            showIptv()
+
+                            toast("IPTV listesi temizlendi")
+
+                        } else {
+                            toast("Liste silinemedi")
+                        }
+                    }
+                    .setNegativeButton("İptal", null)
+                    .show()
+            }
+        }
+
+        menu.addView(clear)
+
+        list.addView(
+            makeText("IPTV KANALLARI")
+        )
+
+        iptvChannels.forEachIndexed { index, channel ->
+
+            val item = makeItem(
+                "${index + 1}. ${channel.name}"
+            )
+
+            item.setOnClickListener {
+                openVideo(index)
+            }
+
+            list.addView(item)
+        }
+
+        if (iptvChannels.isEmpty()) {
+
+            list.addView(
+                makeText("Henüz IPTV kanalı eklenmedi.")
+            )
+        }
+
+        parent.addView(container)
+
+        channelList = container
+        channelColumn = list
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
 
         if (videoScreen != null) {
 
@@ -1077,6 +1544,7 @@ class MainActivity : Activity() {
 
                     KeyEvent.KEYCODE_DPAD_LEFT,
                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
+
                         showSideChannels()
                         return true
                     }
