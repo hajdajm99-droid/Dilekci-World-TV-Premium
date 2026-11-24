@@ -123,6 +123,24 @@ class MainActivity : Activity() {
             "https://skai-live-back.siliconweb.com/media/cambria4/index.m3u8",
             "Yunanistan",
             "🌍 Dünya TV"
+        ),
+        Channel(
+            "oe24 TV",
+            "https://oe24.mdn.ors.at/live/eds/oe24tv_hd/hls_nodrm/oe24tv_hd-nodrm.m3u8",
+            "Avusturya",
+            "🌍 Dünya TV"
+        ),
+        Channel(
+            "W24",
+            "https://ms01.w24.at/W24/smil:liveevent.smil/playlist.m3u8",
+            "Avusturya",
+            "🌍 Dünya TV"
+        ),
+        Channel(
+            "Tirol TV",
+            "https://streaming14.huberwebmedia.at/LiveApp/streams/livestream.m3u8",
+            "Avusturya",
+            "🌍 Dünya TV"
         )
     )
 
@@ -130,6 +148,7 @@ class MainActivity : Activity() {
         Country("ABD", "🇺🇸"),
         Country("Almanya", "🇩🇪"),
         Country("Avustralya", "🇦🇺"),
+        Country("Avusturya", "🇦🇹"),
         Country("Fransa", "🇫🇷"),
         Country("Güney Kore", "🇰🇷"),
         Country("İngiltere", "🇬🇧"),
