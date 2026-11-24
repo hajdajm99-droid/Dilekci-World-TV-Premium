@@ -15,6 +15,22 @@ android {
         versionName = "1.1"
     }
 
+    signingConfigs {
+        create("permanent") {
+            storeFile = rootProject.file("dilekci.p12")
+            storeType = "PKCS12"
+            storePassword = System.getenv("APK_KEYSTORE_PASSWORD")
+            keyAlias = "dilekci"
+            keyPassword = System.getenv("APK_KEYSTORE_PASSWORD")
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("permanent")
+        }
+    }
+
     buildFeatures {
         viewBinding = true
     }
