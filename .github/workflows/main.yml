@@ -33,10 +33,17 @@ jobs:
           chmod 600 dilekci.p12
           test -s dilekci.p12
 
+      - name: Anahtar dosyasini kontrol et
+        env:
+          APK_KEYSTORE_PASSWORD: ${{ secrets.APK_KEYSTORE_PASSWORD }}
+        run: |
+          sha256sum dilekci.p12
+          keytool -list -keystore dilekci.p12 -storetype PKCS12 -alias dilekci -storepass:env APK_KEYSTORE_PASSWORD
+
       - name: Temiz ve imzali APK olustur
         env:
           APK_KEYSTORE_PASSWORD: ${{ secrets.APK_KEYSTORE_PASSWORD }}
-        run: gradle clean assembleDebug --no-build-cache
+        run: gradle clean assembleDebug --no-build-cache --stacktrace
 
       - name: APK dosyasini yukle
         uses: actions/upload-artifact@v4
