@@ -162,7 +162,7 @@ class MainActivity : Activity() {
         r.addView(text("YÜKLENEN LİSTELER"))
         magRecords.forEach { m -> r.addView(item("MAG: ${m.name}",16f) {
             AlertDialog.Builder(this).setTitle(m.name).setItems(arrayOf("Aç","Değiştir","Sil")) { _,i -> when(i) {
-                0 -> toast("MAG yayın bağlantısı henüz aktif değil")
+                0 -> testMag(m)
                 1 -> magDialog(m)
                 2 -> AlertDialog.Builder(this).setMessage("MAG kaydı silinsin mi?").setPositiveButton("Sil") { _,_ -> saveMag(magRecords.filter { it.id!=m.id }) }.setNegativeButton("İptal",null).show()
             } }.show()
@@ -316,13 +316,50 @@ class MainActivity : Activity() {
             magRecords.clear(); magRecords.addAll(items); render(); toast("MAG kayıtları güncellendi")
         } else toast("MAG kaydedilemedi")
     }
+    private fun testMag(record:MagRecord) {
+        if(busy) { toast("Bir işlem devam ediyor"); return }
+        busy=true
+        val progress=AlertDialog.Builder(this).setTitle("MAG bağlantı testi").setMessage("Sunucu kontrol ediliyor...").setCancelable(false).create()
+        progress.show()
+        Thread {
+            var connection:java.net.HttpURLConnection?=null
+            val result=try {
+                val url=URL(record.portal)
+                val c=url.openConnection() as java.net.HttpURLConnection
+                connection=c
+                c.instanceFollowRedirects=false
+                c.requestMethod="GET"
+                c.connectTimeout=12000
+                c.readTimeout=12000
+                val status=c.responseCode
+                when(status) {
+                    in 200..299 -> "HTTP $status: Sunucu yanıt verdi. MAG oturumu henüz doğrulanmadı."
+                    in 300..399 -> "HTTP $status: Sunucu yönlendirme istiyor."
+                    401,403 -> "HTTP $status: Sunucu yetkilendirme istiyor veya erişimi reddetti."
+                    404 -> "HTTP 404: Portal adresi bulunamadı."
+                    else -> "HTTP $status: Sunucu yanıt verdi."
+                }
+            } catch(e:java.net.UnknownHostException) { "Sunucu adresi çözümlenemedi." }
+            catch(e:java.net.SocketTimeoutException) { "Bağlantı zaman aşımına uğradı." }
+            catch(e:javax.net.ssl.SSLException) { "Güvenli bağlantı kurulamadı." }
+            catch(e:Exception) { "Sunucuya bağlantı kurulamadı." }
+            finally { connection?.disconnect() }
+            runOnUiThread {
+                busy=false
+                if(!isDestroyed && !isFinishing) {
+                    progress.dismiss()
+                    AlertDialog.Builder(this).setTitle("MAG bağlantı testi").setMessage(result).setPositiveButton("Tamam",null).show()
+                }
+            }
+        }.start()
+    }
     private fun magDialog(old:MagRecord?=null) {
         val l=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(12),dp(20),dp(12)) }
         val n=input("Liste adı"); n.setText(old?.name ?: "MAG Portal ${magRecords.size+1}")
         val h=input("Portal URL"); h.setText(old?.portal ?: "")
         val m=input("MAC adresi"); m.setText(old?.mac ?: "")
         l.addView(n); l.addView(h); l.addView(m)
-        val d=AlertDialog.Builder(this).setTitle("MAG / Stalker Portal").setView(l).setMessage("Yalnızca kayıt: yayın bağlantısı henüz aktif değil.").setPositiveButton("Kaydet",null).setNegativeButton("İptal",null).create()
+        val d=AlertDialog.Builder(this).setTitle("MAG / Stalker Portal").setView(l).setMessage("Kayıt sonrası Aç seçeneği ile sunucu erişimini test edebilirsiniz. Yayın henüz aktif değil.").setPositiveButton("Kaydet",null).setNegativeButton("İptal",null).create()
         d.show()
         d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val portal=h.text.toString().trim(); val mac=m.text.toString().trim().uppercase(Locale.ROOT)
