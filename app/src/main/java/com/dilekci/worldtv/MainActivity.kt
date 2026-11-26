@@ -21,12 +21,19 @@ class MainActivity : Activity() {
     private val world = "🌍 Dünya TV"
     private val trial = "🧪 Dünya TV Deneme"
     private val iptv = "📡 IPTV"
-    private val categories = listOf("🇹🇷 Türkiye", world, trial, "🎬 Sinema", "📺 Diziler", "🌿 Belgeseller", "⚽ Spor", "📰 Haber", "⭐ Favoriler", iptv)
-    private data class Channel(val name:String,val url:String,val country:String,val hls:Boolean=false)
+    private val settings = "⚙️ Ayarlar"
+    private var group = "Tüm Kanallar"
+    private var replacement: String? = null
+    private val categories = listOf("🇹🇷 Türkiye", world, trial, "🎬 Sinema", "📺 Diziler", "🌿 Belgeseller", "⚽ Spor", "📰 Haber", "⭐ Favoriler", iptv, settings)
+    private data class Channel(val name:String,val url:String,val country:String,val hls:Boolean=false,val group:String="Genel")
     private enum class Source(val key:String,val title:String) {
         XTREAM("xtream_channels","Xtream Codes"), URL("url_channels","M3U URL"), FILE("file_channels","M3U Dosyası"), LEGACY("channels","Eski IPTV Kayıtları")
     }
     private val lists = Source.values().associateWith { mutableListOf<Channel>() }
+    private data class FileList(val id:String,val name:String,val channels:List<Channel>)
+    private val files = mutableListOf<FileList>()
+    private var selectedFile:String? = null
+    private var filesReadable = true
     private var source = Source.XTREAM
     private var category = world
     private var country = "DE"
@@ -72,18 +79,20 @@ class MainActivity : Activity() {
         val result=mutableListOf<Channel>()
         try {
             val a=JSONArray(getSharedPreferences(pref,MODE_PRIVATE).getString(key,"[]") ?: "[]")
-            for(i in 0 until a.length()) { val o=a.getJSONObject(i); result.add(Channel(o.getString("name"),o.getString("url"),o.optString("country",defaultCountry),o.optBoolean("hls",false))) }
+            for(i in 0 until a.length()) { val o=a.getJSONObject(i); result.add(Channel(o.getString("name"),o.getString("url"),o.optString("country",defaultCountry),o.optBoolean("hls",false),o.optString("group","Genel"))) }
         } catch(e:Exception) { toast("Kayıt okunamadı") }
         return result
     }
     private fun write(pref:String,key:String,items:List<Channel>):Boolean {
-        val a=JSONArray(); items.forEach { a.put(JSONObject().put("name",it.name).put("url",it.url).put("country",it.country).put("hls",it.hls)) }
+        val a=JSONArray(); items.forEach { a.put(JSONObject().put("name",it.name).put("url",it.url).put("country",it.country).put("hls",it.hls).put("group",it.group)) }
         return getSharedPreferences(pref,MODE_PRIVATE).edit().putString(key,a.toString()).commit()
     }
     override fun onCreate(state:Bundle?) {
         super.onCreate(state); binding=ActivityMainBinding.inflate(layoutInflater); setContentView(binding.root)
         read("world_tv_saved","channels","").filter { it.country in codes && it.url.startsWith("https://") }.forEach { c -> if(channels.none { same(it,c) }) { channels.add(c); saved.add(c) } }
-        Source.values().forEach { lists.getValue(it).addAll(read("iptv_saved",it.key,"IPTV")) }
+        Source.values().filter { it!=Source.LEGACY && it!=Source.FILE }.forEach { lists.getValue(it).addAll(read("iptv_saved",it.key,"IPTV")) }
+        loadFiles()
+        if(filesReadable && storeFiles(files.filter { it.id!="legacy-file" })) { files.removeAll { it.id=="legacy-file" }; getSharedPreferences("iptv_saved",MODE_PRIVATE).edit().remove("channels").remove("file_channels").apply() }
         source=Source.values().firstOrNull { lists.getValue(it).isNotEmpty() } ?: Source.XTREAM
         binding.sectionContainer.removeAllViews(); binding.primaryAction.visibility=View.GONE; binding.secondaryAction.visibility=View.GONE
         categories.forEach { c -> binding.sectionContainer.addView(item(c,17f) { select(c) }) }
@@ -95,15 +104,22 @@ class MainActivity : Activity() {
     private fun render() {
         content?.let { (it.parent as? LinearLayout)?.removeView(it) }; content=null; right=null
         binding.sectionTitle.text=category; binding.contentTitle.text=category
-        if(category!=world && category!=trial && category!=iptv) { binding.contentDescription.text="Bu kategoriye henüz yayın eklenmedi."; return }
+        if(category!=world && category!=trial && category!=iptv && category!=settings) { binding.contentDescription.text="Bu kategoriye henüz yayın eklenmedi."; return }
         val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; setPadding(0,dp(16),0,0) }
+        (binding.contentDescription.parent as LinearLayout).addView(row,LinearLayout.LayoutParams(-1,0,1f)); content=row
+        if(category==settings) { renderSettings(row); return }
         val left=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; val r=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
-        row.addView(ScrollView(this).apply { addView(left) },LinearLayout.LayoutParams(0,dp(360),1f))
-        row.addView(ScrollView(this).apply { addView(r) },LinearLayout.LayoutParams(0,dp(360),1.5f))
-        (binding.contentDescription.parent as LinearLayout).addView(row); content=row; right=r
+        row.addView(ScrollView(this).apply { addView(left) },LinearLayout.LayoutParams(0,-1,1f))
+        row.addView(r,LinearLayout.LayoutParams(0,-1,1.5f)); right=r
         if(category==iptv) {
-            binding.contentTitle.text="IPTV - LİSTELERİM"; binding.contentDescription.text="${lists.values.sumOf { it.size }} kayıtlı kanal"
-            Source.values().forEach { s -> left.addView(item("${s.title} (${lists.getValue(s).size})",16f) { source=s; renderRight() }) }
+            val f=files.firstOrNull { it.id==selectedFile }
+            binding.contentTitle.text=if(source==Source.FILE) f?.name ?: "IPTV" else source.title
+            val all=allIptv(); binding.contentDescription.text="${all.size} kanal"
+            left.addView(text("KATEGORİLER"))
+            val groups=listOf("Tüm Kanallar")+all.map { it.group }.distinct().filter { it!="Tüm Kanallar" }.sorted()
+            if(group !in groups) group="Tüm Kanallar"
+            left.addView(item("⚙️ Liste seç",16f) { select(settings) })
+            groups.forEach { g -> left.addView(item(g,16f) { group=g; renderRight() }) }
         } else {
             val all=if(category==trial) trials else channels; val collator=Collator.getInstance(tr)
             val countries=all.map { it.country }.distinct().sortedWith { a,b -> collator.compare(countryName(a),countryName(b)) }
@@ -113,12 +129,43 @@ class MainActivity : Activity() {
         }
         renderRight()
     }
-    private fun active():List<Channel> = when(category) { iptv->lists.getValue(source); world->channels.filter { it.country==country }; trial->trials.filter { it.country==country }; else->emptyList() }
+    private fun allIptv():List<Channel> = if(source==Source.FILE) files.firstOrNull { it.id==selectedFile }?.channels ?: emptyList() else lists.getValue(source)
+    private fun active():List<Channel> = when(category) { iptv->allIptv().let { if(group=="Tüm Kanallar") it else it.filter { c->c.group==group } }; world->channels.filter { it.country==country }; trial->trials.filter { it.country==country }; else->emptyList() }
+    private fun channelList(a:List<Channel>, action:(Int)->Unit)=ListView(this).apply {
+        adapter=object:BaseAdapter() {
+            override fun getCount()=a.size
+            override fun getItem(position:Int)=a[position]
+            override fun getItemId(position:Int)=position.toLong()
+            override fun getView(position:Int,convertView:View?,parent:ViewGroup?):View {
+                val v=convertView as? TextView ?: this@MainActivity.text("")
+                v.text="${position+1}. ${a[position].name}"; return v
+            }
+        }
+        setOnItemClickListener { _,_,i,_->action(i) }
+    }
     private fun renderRight() {
-        val r=right ?: return; r.removeAllViews(); r.addView(text(if(category==iptv) source.title else countryName(country)))
-        if(category==iptv && source!=Source.LEGACY) r.addView(item("➕ Liste ekle",17f) { when(source) { Source.XTREAM->xtream(); Source.URL->m3u(); Source.FILE->pickFile(); else->Unit } })
+        val r=right ?: return; r.removeAllViews(); r.addView(text(if(category==iptv) "KANAL LİSTESİ" else countryName(country)))
         val a=active(); if(a.isEmpty()) r.addView(text("Henüz kanal bulunamadı."))
-        a.forEachIndexed { i,c -> r.addView(item("${i+1}. ${c.name}") { openVideo(i) }) }
+        else r.addView(channelList(a) { openVideo(it) },LinearLayout.LayoutParams(-1,0,1f))
+    }
+    private fun renderSettings(row:LinearLayout) {
+        binding.contentTitle.text="IPTV BAĞLANTI AYARLARI"; binding.contentDescription.text="Yüklenen listeleri yönet"
+        val l=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; val r=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+        row.addView(ScrollView(this).apply { addView(l) },LinearLayout.LayoutParams(0,-1,1f)); row.addView(ScrollView(this).apply { addView(r) },LinearLayout.LayoutParams(0,-1,1.5f))
+        l.addView(item("Xtream Codes Ekle",16f) { xtream() }); l.addView(item("M3U / M3U8 URL Ekle",16f) { m3u() }); l.addView(item("Dosyadan Yükle",16f) { pickFile() }); l.addView(item("MAG / Stalker Portal",16f) { toast("Portal bağlantısı henüz aktif değil") })
+        r.addView(text("YÜKLENEN LİSTELER"))
+        Source.values().filter { it==Source.XTREAM || it==Source.URL }.forEach { s -> if(lists.getValue(s).isNotEmpty()) r.addView(item(s.title) { source=s; group="Tüm Kanallar"; select(iptv) }) }
+        files.forEach { f -> r.addView(item(f.name,16f) {
+            AlertDialog.Builder(this).setTitle(f.name).setItems(arrayOf("Aç","Değiştir","Sil")) { _,i -> when(i) {
+                0->{ source=Source.FILE; selectedFile=f.id; group="Tüm Kanallar"; select(iptv) }
+                1->{ if(!busy) { replacement=f.id; pickFile() } }
+                2->{ AlertDialog.Builder(this).setMessage("Liste silinsin mi? Orijinal dosya korunur.").setPositiveButton("Sil") { _,_-> if(!busy) persistFiles(files.filter { it.id!=f.id }) }.setNegativeButton("İptal",null).show() }
+            } }.show()
+        }) }
+    }
+    private fun persistFiles(items:List<FileList>) {
+        if(busy) return; busy=true
+        Thread { val ok=try { storeFiles(items) } catch(e:Exception) { false }; runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) { if(ok) { files.clear(); files.addAll(items); if(screen==null) render() } else toast("Kayıt başarısız") } } }.start()
     }
     private fun openVideo(i:Int) {
         val a=active().toList(); if(i !in a.indices) return; closeVideo(); playing=a
@@ -136,9 +183,8 @@ class MainActivity : Activity() {
     private fun side() {
         val f=screen ?: return; if(panel!=null) return
         val p=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(0xEE192638.toInt()); setPadding(dp(8),dp(12),dp(8),dp(12)) }; panel=p
-        f.addView(p,FrameLayout.LayoutParams(dp(300),-1,Gravity.START)); p.addView(text(if(category==iptv) source.title else "KANALLAR"))
-        val l=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; p.addView(ScrollView(this).apply { addView(l) },LinearLayout.LayoutParams(-1,0,1f))
-        playing.forEachIndexed { i,c -> l.addView(item("${i+1}. ${c.name}") { play(i); hideSide() }) }; l.getChildAt(current)?.requestFocus()
+        f.addView(p,FrameLayout.LayoutParams(dp(300),-1,Gravity.START)); p.addView(text(if(category==iptv && source==Source.FILE) files.firstOrNull { it.id==selectedFile }?.name ?: "KANALLAR" else if(category==iptv) source.title else "KANALLAR"))
+        val lv=channelList(playing) { i->play(i); hideSide() }; p.addView(lv,LinearLayout.LayoutParams(-1,0,1f)); lv.requestFocus(); lv.setSelection(current)
     }
     private fun hideSide() { panel?.let { (it.parent as? FrameLayout)?.removeView(it) }; panel=null; screen?.requestFocus() }
     private fun closeVideo() { hideSide(); player?.release(); player=null; screen?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }; screen=null; playing=emptyList(); confirmed=false }
@@ -149,14 +195,14 @@ class MainActivity : Activity() {
     }
     private fun parse(body:String,base:String?=null):List<Channel> {
         if(body.contains("#EXT-X-TARGETDURATION") || body.contains("#EXT-X-STREAM-INF")) return if(base!=null) listOf(Channel("HLS Yayını",base,"IPTV",true)) else emptyList()
-        val result=mutableListOf<Channel>(); var name=""
-        body.lineSequence().forEach { raw -> val line=raw.trim().removePrefix("\uFEFF"); if(line.startsWith("#EXTINF:")) name=line.substringAfterLast(',').trim() else if(line.isNotBlank() && !line.startsWith("#")) { val u=try { if(base!=null) URL(URL(base),line).toString() else line } catch(e:Exception) { line }; if(u.startsWith("https://") || u.startsWith("http://")) result.add(Channel(name.ifBlank { "Kanal ${result.size+1}" },u,"IPTV",u.substringBefore('?').endsWith(".m3u8",true))); name="" } }
+        val result=mutableListOf<Channel>(); var name=""; var g="Genel"; val gr=Regex("group-title=\"([^\"]*)\"",RegexOption.IGNORE_CASE)
+        body.lineSequence().forEach { raw -> val line=raw.trim().removePrefix("\uFEFF"); if(line.startsWith("#EXTINF:")) { name=line.substringAfterLast(',').trim(); g=gr.find(line)?.groupValues?.get(1)?.ifBlank { "Genel" } ?: "Genel" } else if(line.isNotBlank() && !line.startsWith("#")) { val u=try { if(base!=null) URL(URL(base),line).toString() else line } catch(e:Exception) { line }; if(u.startsWith("https://") || u.startsWith("http://")) result.add(Channel(name.ifBlank { "Kanal ${result.size+1}" },u,"IPTV",u.substringBefore('?').endsWith(".m3u8",true),g)); name=""; g="Genel" } }
         return result.distinctBy { it.url }
     }
     private fun save(s:Source,a:List<Channel>) {
         if(a.isEmpty()) { toast("IPTV kanalı bulunamadı"); return }; val target=lists.getValue(s); val merged=(target+a).distinctBy { it.url }
         if(!write("iptv_saved",s.key,merged)) { toast("Liste kaydedilemedi"); return }; target.clear(); target.addAll(merged)
-        if(category==iptv && screen==null) { source=s; render() }; toast("${s.title}: ${target.size} kanal")
+        if(screen==null) { source=s; group="Tüm Kanallar"; render() }; toast("${s.title}: ${target.size} kanal")
     }
     private fun fetch(u:String):Pair<String,String> { val c=URL(u).openConnection(); c.connectTimeout=20000; c.readTimeout=30000; val body=c.getInputStream().bufferedReader(Charsets.UTF_8).use { it.readText() }; return body to c.url.toString() }
     private fun importUrl(u:String,s:Source) {
@@ -171,8 +217,48 @@ class MainActivity : Activity() {
     }
     private fun pickFile() { try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="*/*" },501) } catch(e:Exception) { toast("Dosya seçici bulunamadı") } }
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
-        super.onActivityResult(requestCode,resultCode,data); if(requestCode!=501 || resultCode!=RESULT_OK) return; val uri=data?.data ?: return; if(busy) { toast("Liste yükleniyor"); return }; busy=true
-        Thread { try { val body=contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: error("Dosya okunamadı"); val a=parse(body); runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) save(Source.FILE,a) } } catch(e:Exception) { runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) toast("Dosya okunamadı") } } }.start()
+        super.onActivityResult(requestCode,resultCode,data); if(requestCode!=501) return; if(resultCode!=RESULT_OK) { replacement=null; return }; val uri=data?.data ?: return; if(busy) { toast("Liste yükleniyor"); return }; busy=true
+        Thread { try { val filename=contentResolver.query(uri,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),null,null,null)?.use { c -> if(c.moveToFirst()) c.getString(0) else null } ?: "M3U dosyası"
+            val body=contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: error("Dosya okunamadı"); val a=parse(body); runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) saveFile(filename,a) } } catch(e:Exception) { runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) toast("Dosya okunamadı") } } }.start()
+    }
+    private fun loadFiles() {
+        val prefs=getSharedPreferences("iptv_saved",MODE_PRIVATE)
+        try {
+            val a=JSONArray(prefs.getString("named_files_v1","[]") ?: "[]")
+            val loaded=mutableListOf<FileList>()
+            for(i in 0 until a.length()) {
+                val o=a.getJSONObject(i); val entries=o.getJSONArray("channels")
+                val items=mutableListOf<Channel>()
+                for(j in 0 until entries.length()) {
+                    val c=entries.getJSONObject(j)
+                    items.add(Channel(c.getString("name"),c.getString("url"),"IPTV",c.optBoolean("hls",false),c.optString("group","Genel")))
+                }
+                loaded.add(FileList(o.getString("id"),o.getString("name"),items))
+            }
+            files.addAll(loaded)
+            val old=lists.getValue(Source.FILE)
+            if(!prefs.getBoolean("named_files_migrated",false) && old.isNotEmpty()) {
+                val migrated=files+FileList("legacy-file","Eski M3U dosya kayıtları",old.toList())
+                if(storeFiles(migrated)) { files.clear(); files.addAll(migrated) }
+                else { files.add(migrated.last()); filesReadable=false; toast("Eski dosya kayıtları korunuyor; kayıt yapılamadı") }
+            }
+        } catch(e:Exception) { filesReadable=false; toast("Dosya kayıtları okunamadı; eski kayıtlar silinmedi") }
+    }
+    private fun storeFiles(items:List<FileList>):Boolean {
+        if(!filesReadable) return false
+        val a=JSONArray()
+        items.forEach { f ->
+            val entries=JSONArray()
+            f.channels.forEach { c -> entries.put(JSONObject().put("name",c.name).put("url",c.url).put("hls",c.hls).put("group",c.group)) }
+            a.put(JSONObject().put("id",f.id).put("name",f.name).put("channels",entries))
+        }
+        return getSharedPreferences("iptv_saved",MODE_PRIVATE).edit().putString("named_files_v1",a.toString()).putBoolean("named_files_migrated",true).commit()
+    }
+    private fun saveFile(name:String,items:List<Channel>) {
+        val id=replacement; replacement=null
+        if(items.isEmpty()) { toast("Dosyada desteklenen kanal bulunamadı"); return }
+        val f=FileList(id ?: java.util.UUID.randomUUID().toString(),name,items)
+        persistFiles(files.filter { it.id!=f.id }+f)
     }
     private fun loadTrials() {
         if(trialBusy) return; trialBusy=true; binding.contentDescription.text="Kanallar yükleniyor..."
@@ -189,7 +275,7 @@ class MainActivity : Activity() {
             val ok=event.keyCode==KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode==KeyEvent.KEYCODE_ENTER
             if(ok && panel==null) { if(event.action==KeyEvent.ACTION_UP && !event.isCanceled) { if(event.eventTime-event.downTime>=700) saveTrial() else player?.let { if(it.playWhenReady) it.pause() else it.play() } }; return true }
             if(event.action==KeyEvent.ACTION_DOWN) when(event.keyCode) { KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT -> { side(); return true }; KeyEvent.KEYCODE_BACK -> { if(panel!=null) hideSide() else { closeVideo(); render(); binding.sectionContainer.getChildAt(categories.indexOf(category))?.requestFocus() }; return true } }
-        }; return super.dispatchKeyEvent(event)
+        }; if(screen==null && category==iptv && source==Source.FILE && selectedFile!=null && event.keyCode==KeyEvent.KEYCODE_BACK && event.action==KeyEvent.ACTION_DOWN) { selectedFile=null; renderRight(); right?.getChildAt(1)?.requestFocus(); return true }; return super.dispatchKeyEvent(event)
     }
     override fun onDestroy() { closeVideo(); super.onDestroy() }
 }
