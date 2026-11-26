@@ -96,6 +96,7 @@ class MainActivity : Activity() {
         read("world_tv_saved","channels","").filter { it.country in codes && it.url.startsWith("https://") }.forEach { c -> if(channels.none { same(it,c) }) { channels.add(c); saved.add(c) } }
         Source.values().filter { it!=Source.LEGACY && it!=Source.FILE }.forEach { lists.getValue(it).addAll(read("iptv_saved",it.key,"IPTV")) }
         loadConnections()
+        loadMag()
         loadFiles()
         if(filesReadable && storeFiles(files.filter { it.id!="legacy-file" })) { files.removeAll { it.id=="legacy-file" }; getSharedPreferences("iptv_saved",MODE_PRIVATE).edit().remove("channels").remove("file_channels").apply() }
         source=connections.firstOrNull()?.source ?: Source.XTREAM
@@ -157,8 +158,16 @@ class MainActivity : Activity() {
         binding.contentTitle.text="IPTV BAĞLANTI AYARLARI"; binding.contentDescription.text="Yüklenen listeleri yönet"
         val l=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; val r=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         row.addView(ScrollView(this).apply { addView(l) },LinearLayout.LayoutParams(0,-1,1f)); row.addView(ScrollView(this).apply { addView(r) },LinearLayout.LayoutParams(0,-1,1.5f))
-        l.addView(item("Xtream Codes Ekle",16f) { xtream() }); l.addView(item("M3U / M3U8 URL Ekle",16f) { m3u() }); l.addView(item("Dosyadan Yükle",16f) { pickFile() }); l.addView(item("MAG / Stalker Portal",16f) { toast("Portal bağlantısı henüz aktif değil") })
+        l.addView(item("Xtream Codes Ekle",16f) { xtream() }); l.addView(item("M3U / M3U8 URL Ekle",16f) { m3u() }); l.addView(item("Dosyadan Yükle",16f) { pickFile() }); l.addView(item("MAG / Stalker Portal",16f) { magDialog() })
         r.addView(text("YÜKLENEN LİSTELER"))
+        magRecords.forEach { m -> r.addView(item("MAG: ${m.name}",16f) {
+            AlertDialog.Builder(this).setTitle(m.name).setItems(arrayOf("Aç","Değiştir","Sil")) { _,i -> when(i) {
+                0 -> toast("MAG yayın bağlantısı henüz aktif değil")
+                1 -> magDialog(m)
+                2 -> AlertDialog.Builder(this).setMessage("MAG kaydı silinsin mi?").setPositiveButton("Sil") { _,_ -> saveMag(magRecords.filter { it.id!=m.id }) }.setNegativeButton("İptal",null).show()
+            } }.show()
+        }) }
+
         connections.forEach { c -> r.addView(item("${c.source.title}: ${c.name}",16f) {
             AlertDialog.Builder(this).setTitle(c.name).setItems(arrayOf("Aç","Değiştir","Sil")) { _,i -> when(i) {
                 0 -> { source=c.source; selectedConnection=c.id; group="Tüm Kanallar"; select(iptv) }
@@ -290,6 +299,39 @@ class MainActivity : Activity() {
         val n=input("Liste adı"); n.setText(old?.name ?: "Xtream ${connections.count { it.source==Source.XTREAM }+1}")
         val h=input("Sunucu URL"); val u=input("Kullanıcı adı"); val p=input("Şifre"); p.inputType=129; l.addView(n); l.addView(h); l.addView(u); l.addView(p)
         AlertDialog.Builder(this).setTitle("Xtream Codes").setView(l).setPositiveButton("Bağlan") { _,_ -> val host=h.text.toString().trim().trimEnd('/'); val user=u.text.toString().trim(); val pass=p.text.toString(); if(host.isBlank() || user.isBlank() || pass.isBlank()) toast("Tüm alanları doldurun") else importUrl("$host/get.php?username=${URLEncoder.encode(user,"UTF-8")}&password=${URLEncoder.encode(pass,"UTF-8")}&type=m3u_plus&output=m3u8",Source.XTREAM,n.text.toString().trim().ifBlank { "Xtream Codes" },old?.id) }.setNegativeButton("İptal",null).show()
+    }
+    private data class MagRecord(val id:String,val name:String,val portal:String,val mac:String)
+    private val magRecords=mutableListOf<MagRecord>()
+    private var magReadable=true
+    private fun loadMag() {
+        try {
+            val a=JSONArray(getSharedPreferences("mag_saved",MODE_PRIVATE).getString("records","[]") ?: "[]")
+            for(i in 0 until a.length()) { val o=a.getJSONObject(i); magRecords.add(MagRecord(o.getString("id"),o.getString("name"),o.getString("portal"),o.getString("mac"))) }
+        } catch(e:Exception) { magReadable=false; toast("MAG kayıtları okunamadı") }
+    }
+    private fun saveMag(items:List<MagRecord>) {
+        if(!magReadable) { toast("Eski MAG kayıtları korunuyor"); return }
+        val a=JSONArray(); items.forEach { a.put(JSONObject().put("id",it.id).put("name",it.name).put("portal",it.portal).put("mac",it.mac)) }
+        if(getSharedPreferences("mag_saved",MODE_PRIVATE).edit().putString("records",a.toString()).commit()) {
+            magRecords.clear(); magRecords.addAll(items); render(); toast("MAG kayıtları güncellendi")
+        } else toast("MAG kaydedilemedi")
+    }
+    private fun magDialog(old:MagRecord?=null) {
+        val l=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(12),dp(20),dp(12)) }
+        val n=input("Liste adı"); n.setText(old?.name ?: "MAG Portal ${magRecords.size+1}")
+        val h=input("Portal URL"); h.setText(old?.portal ?: "")
+        val m=input("MAC adresi"); m.setText(old?.mac ?: "")
+        l.addView(n); l.addView(h); l.addView(m)
+        val d=AlertDialog.Builder(this).setTitle("MAG / Stalker Portal").setView(l).setMessage("Yalnızca kayıt: yayın bağlantısı henüz aktif değil.").setPositiveButton("Kaydet",null).setNegativeButton("İptal",null).create()
+        d.show()
+        d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val portal=h.text.toString().trim(); val mac=m.text.toString().trim().uppercase(Locale.ROOT)
+            val valid=try { val u=URL(portal); u.protocol in listOf("http","https") && u.host.isNotBlank() && u.userInfo==null } catch(e:Exception) { false }
+            if(!valid) { h.error="Geçerli portal URL girin"; return@setOnClickListener }
+            if(!Regex("[0-9A-F]{2}(:[0-9A-F]{2}){5}").matches(mac)) { m.error="MAC biçimi: XX:XX:XX:XX:XX:XX"; return@setOnClickListener }
+            val record=MagRecord(old?.id ?: java.util.UUID.randomUUID().toString(),n.text.toString().trim().ifBlank { "MAG Portal" },portal,mac)
+            saveMag(magRecords.filter { it.id!=record.id }+record); d.dismiss()
+        }
     }
     private fun pickFile() { try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="*/*" },501) } catch(e:Exception) { toast("Dosya seçici bulunamadı") } }
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
