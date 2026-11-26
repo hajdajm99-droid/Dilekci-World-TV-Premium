@@ -21,10 +21,11 @@ class MainActivity : Activity() {
     private val world = "🌍 Dünya TV"
     private val trial = "🧪 Dünya TV Deneme"
     private val iptv = "📡 IPTV"
+    private val magDemo = "🧪 MAG Deneme"
     private val settings = "⚙️ Ayarlar"
     private var group = "Tüm Kanallar"
     private var replacement: String? = null
-    private val categories = listOf("🇹🇷 Türkiye", world, trial, "🎬 Sinema", "📺 Diziler", "🌿 Belgeseller", "⚽ Spor", "📰 Haber", "⭐ Favoriler", iptv, settings)
+    private val categories = listOf("🇹🇷 Türkiye", world, trial, "🎬 Sinema", "📺 Diziler", "🌿 Belgeseller", "⚽ Spor", "📰 Haber", "⭐ Favoriler", iptv, magDemo, settings)
     private data class Channel(val name:String,val url:String,val country:String,val hls:Boolean=false,val group:String="Genel")
     private enum class Source(val key:String,val title:String) {
         XTREAM("xtream_channels","Xtream Codes"), URL("url_channels","M3U URL"), FILE("file_channels","M3U Dosyası"), LEGACY("channels","Eski IPTV Kayıtları")
@@ -71,6 +72,9 @@ class MainActivity : Activity() {
         Channel("W24","https://ms01.w24.at/W24/smil:liveevent.smil/playlist.m3u8","AT"),
         Channel("Tirol TV","https://streaming14.huberwebmedia.at/LiveApp/streams/livestream.m3u8","AT")
     )
+    private val magDemoChannels by lazy {
+        channels.filter { it.name in setOf("DW English", "Savoir Média", "France 24 English") }.map { it.copy(group="Deneme", hls=true) }
+    }
     private val allowed = mapOf(
         "TR" to "TRT Haber|TRT World|TRT Belgesel|TRT EBA TV", "DE" to "DW English|DW Deutsch|DW Español|tagesschau24", "FR" to "France 24 English|France 24 French|France 24 Arabic|France 24 Spanish|Franceinfo", "GB" to "Sky News|BBC News", "US" to "CBS News|CBS News 24/7|ABC News Live|NBC News NOW|NASA TV|NASA+|PBS NewsHour", "CA" to "Savoir Média|CBC News|CBC News Explore", "AU" to "ABC News|ABC News Australia", "JP" to "NHK WORLD-JAPAN|NHK World Japan", "KR" to "Arirang TV|Arirang World|KBS World", "AT" to "oe24 TV|W24|Tirol TV", "CH" to "SRF info", "IT" to "Rai News 24", "ES" to "Canal 24 Horas|24h", "PT" to "RTP Notícias|RTP Internacional", "MX" to "Canal Once|Canal 22", "RO" to "TVR International|TVR Info", "GR" to "ERT News|ERT World", "IN" to "DD News|DD India", "SG" to "CNA|Channel NewsAsia", "NZ" to "RNZ", "BR" to "TV Brasil|TV Cultura", "AR" to "Canal Encuentro", "CL" to "24 Horas", "FI" to "Yle TV1", "NO" to "NRK1", "SE" to "SVT24", "NL" to "NPO Nieuws", "BE" to "VRT NWS", "ZA" to "SABC News", "KE" to "KBC Channel 1", "ID" to "TVRI World", "TH" to "Thai PBS", "MY" to "Bernama TV"
     )
@@ -110,14 +114,18 @@ class MainActivity : Activity() {
     private fun render() {
         content?.let { (it.parent as? LinearLayout)?.removeView(it) }; content=null; right=null
         binding.sectionTitle.text=category; binding.contentTitle.text=category
-        if(category!=world && category!=trial && category!=iptv && category!=settings) { binding.contentDescription.text="Bu kategoriye henüz yayın eklenmedi."; return }
+        if(category!=world && category!=trial && category!=iptv && category!=magDemo && category!=settings) { binding.contentDescription.text="Bu kategoriye henüz yayın eklenmedi."; return }
         val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; setPadding(0,dp(16),0,0) }
         (binding.contentDescription.parent as LinearLayout).addView(row,LinearLayout.LayoutParams(-1,0,1f)); content=row
         if(category==settings) { renderSettings(row); return }
         val left=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; val r=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         row.addView(ScrollView(this).apply { addView(left) },LinearLayout.LayoutParams(0,-1,1f))
         row.addView(r,LinearLayout.LayoutParams(0,-1,1.5f)); right=r
-        if(category==iptv) {
+        if(category==magDemo) {
+            binding.contentDescription.text="Yerel deneme • Gerçek MAG hesabı kullanılmaz"
+            left.addView(text("DENEME KANALLARI"))
+            left.addView(item("Tüm Kanallar",16f) { renderRight() })
+        } else if(category==iptv) {
             val f=files.firstOrNull { it.id==selectedFile }
             binding.contentTitle.text=if(source==Source.FILE) f?.name ?: "IPTV" else connections.firstOrNull { it.id==selectedConnection }?.name ?: source.title
             val all=allIptv(); binding.contentDescription.text="${all.size} kanal"
@@ -136,7 +144,7 @@ class MainActivity : Activity() {
         renderRight()
     }
     private fun allIptv():List<Channel> = if(source==Source.FILE) files.firstOrNull { it.id==selectedFile }?.channels ?: emptyList() else connections.firstOrNull { it.id==selectedConnection && it.source==source }?.channels ?: emptyList()
-    private fun active():List<Channel> = when(category) { iptv->allIptv().let { if(group=="Tüm Kanallar") it else it.filter { c->c.group==group } }; world->channels.filter { it.country==country }; trial->trials.filter { it.country==country }; else->emptyList() }
+    private fun active():List<Channel> = when(category) { magDemo->magDemoChannels; iptv->allIptv().let { if(group=="Tüm Kanallar") it else it.filter { c->c.group==group } }; world->channels.filter { it.country==country }; trial->trials.filter { it.country==country }; else->emptyList() }
     private fun channelList(a:List<Channel>, action:(Int)->Unit)=ListView(this).apply {
         adapter=object:BaseAdapter() {
             override fun getCount()=a.size
@@ -150,7 +158,7 @@ class MainActivity : Activity() {
         setOnItemClickListener { _,_,i,_->action(i) }
     }
     private fun renderRight() {
-        val r=right ?: return; r.removeAllViews(); r.addView(text(if(category==iptv) "KANAL LİSTESİ" else countryName(country)))
+        val r=right ?: return; r.removeAllViews(); r.addView(text(if(category==magDemo) "MAG DENEME KANALLARI" else if(category==iptv) "KANAL LİSTESİ" else countryName(country)))
         val a=active(); if(a.isEmpty()) r.addView(text("Henüz kanal bulunamadı."))
         else r.addView(channelList(a) { openVideo(it) },LinearLayout.LayoutParams(-1,0,1f))
     }
@@ -159,6 +167,7 @@ class MainActivity : Activity() {
         val l=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; val r=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         row.addView(ScrollView(this).apply { addView(l) },LinearLayout.LayoutParams(0,-1,1f)); row.addView(ScrollView(this).apply { addView(r) },LinearLayout.LayoutParams(0,-1,1.5f))
         l.addView(item("Xtream Codes Ekle",16f) { xtream() }); l.addView(item("M3U / M3U8 URL Ekle",16f) { m3u() }); l.addView(item("Dosyadan Yükle",16f) { pickFile() }); l.addView(item("MAG / Stalker Portal",16f) { magDialog() })
+        l.addView(item("MAG Deneme Kanalları",16f) { select(magDemo) })
         r.addView(text("YÜKLENEN LİSTELER"))
         magRecords.forEach { m -> r.addView(item("MAG: ${m.name}",16f) {
             AlertDialog.Builder(this).setTitle(m.name).setItems(arrayOf("Aç","Değiştir","Sil")) { _,i -> when(i) {
