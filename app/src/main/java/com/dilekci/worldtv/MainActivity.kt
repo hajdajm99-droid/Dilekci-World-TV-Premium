@@ -32,6 +32,10 @@ class MainActivity : Activity() {
     private val lists = Source.values().associateWith { mutableListOf<Channel>() }
     private data class FileList(val id:String,val name:String,val channels:List<Channel>)
     private val files = mutableListOf<FileList>()
+    private data class Connection(val id:String,val name:String,val source:Source,val channels:List<Channel>)
+    private val connections=mutableListOf<Connection>()
+    private var selectedConnection:String?=null
+    private var connectionsReadable=true
     private var selectedFile:String? = null
     private var filesReadable = true
     private var source = Source.XTREAM
@@ -91,9 +95,10 @@ class MainActivity : Activity() {
         super.onCreate(state); binding=ActivityMainBinding.inflate(layoutInflater); setContentView(binding.root)
         read("world_tv_saved","channels","").filter { it.country in codes && it.url.startsWith("https://") }.forEach { c -> if(channels.none { same(it,c) }) { channels.add(c); saved.add(c) } }
         Source.values().filter { it!=Source.LEGACY && it!=Source.FILE }.forEach { lists.getValue(it).addAll(read("iptv_saved",it.key,"IPTV")) }
+        loadConnections()
         loadFiles()
         if(filesReadable && storeFiles(files.filter { it.id!="legacy-file" })) { files.removeAll { it.id=="legacy-file" }; getSharedPreferences("iptv_saved",MODE_PRIVATE).edit().remove("channels").remove("file_channels").apply() }
-        source=Source.values().firstOrNull { lists.getValue(it).isNotEmpty() } ?: Source.XTREAM
+        source=connections.firstOrNull()?.source ?: Source.XTREAM
         binding.sectionContainer.removeAllViews(); binding.primaryAction.visibility=View.GONE; binding.secondaryAction.visibility=View.GONE
         categories.forEach { c -> binding.sectionContainer.addView(item(c,17f) { select(c) }) }
         select(world); binding.sectionContainer.getChildAt(1)?.requestFocus()
@@ -113,7 +118,7 @@ class MainActivity : Activity() {
         row.addView(r,LinearLayout.LayoutParams(0,-1,1.5f)); right=r
         if(category==iptv) {
             val f=files.firstOrNull { it.id==selectedFile }
-            binding.contentTitle.text=if(source==Source.FILE) f?.name ?: "IPTV" else source.title
+            binding.contentTitle.text=if(source==Source.FILE) f?.name ?: "IPTV" else connections.firstOrNull { it.id==selectedConnection }?.name ?: source.title
             val all=allIptv(); binding.contentDescription.text="${all.size} kanal"
             left.addView(text("KATEGORİLER"))
             val groups=listOf("Tüm Kanallar")+all.map { it.group }.distinct().filter { it!="Tüm Kanallar" }.sorted()
@@ -129,7 +134,7 @@ class MainActivity : Activity() {
         }
         renderRight()
     }
-    private fun allIptv():List<Channel> = if(source==Source.FILE) files.firstOrNull { it.id==selectedFile }?.channels ?: emptyList() else lists.getValue(source)
+    private fun allIptv():List<Channel> = if(source==Source.FILE) files.firstOrNull { it.id==selectedFile }?.channels ?: emptyList() else connections.firstOrNull { it.id==selectedConnection && it.source==source }?.channels ?: emptyList()
     private fun active():List<Channel> = when(category) { iptv->allIptv().let { if(group=="Tüm Kanallar") it else it.filter { c->c.group==group } }; world->channels.filter { it.country==country }; trial->trials.filter { it.country==country }; else->emptyList() }
     private fun channelList(a:List<Channel>, action:(Int)->Unit)=ListView(this).apply {
         adapter=object:BaseAdapter() {
@@ -154,7 +159,13 @@ class MainActivity : Activity() {
         row.addView(ScrollView(this).apply { addView(l) },LinearLayout.LayoutParams(0,-1,1f)); row.addView(ScrollView(this).apply { addView(r) },LinearLayout.LayoutParams(0,-1,1.5f))
         l.addView(item("Xtream Codes Ekle",16f) { xtream() }); l.addView(item("M3U / M3U8 URL Ekle",16f) { m3u() }); l.addView(item("Dosyadan Yükle",16f) { pickFile() }); l.addView(item("MAG / Stalker Portal",16f) { toast("Portal bağlantısı henüz aktif değil") })
         r.addView(text("YÜKLENEN LİSTELER"))
-        Source.values().filter { it==Source.XTREAM || it==Source.URL }.forEach { s -> if(lists.getValue(s).isNotEmpty()) r.addView(item(s.title) { source=s; group="Tüm Kanallar"; select(iptv) }) }
+        connections.forEach { c -> r.addView(item("${c.source.title}: ${c.name}",16f) {
+            AlertDialog.Builder(this).setTitle(c.name).setItems(arrayOf("Aç","Değiştir","Sil")) { _,i -> when(i) {
+                0 -> { source=c.source; selectedConnection=c.id; group="Tüm Kanallar"; select(iptv) }
+                1 -> { if(busy) toast("Liste yükleniyor") else if(c.source==Source.URL) m3u(c) else xtream(c) }
+                2 -> AlertDialog.Builder(this).setMessage("Bu bağlantı silinsin mi?").setPositiveButton("Sil") { _,_ -> persistConnections(connections.filter { it.id!=c.id }) }.setNegativeButton("İptal",null).show()
+            } }.show()
+        }) }
         files.forEach { f -> r.addView(item(f.name,16f) {
             AlertDialog.Builder(this).setTitle(f.name).setItems(arrayOf("Aç","Değiştir","Sil")) { _,i -> when(i) {
                 0->{ source=Source.FILE; selectedFile=f.id; group="Tüm Kanallar"; select(iptv) }
@@ -183,7 +194,7 @@ class MainActivity : Activity() {
     private fun side() {
         val f=screen ?: return; if(panel!=null) return
         val p=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(0xEE192638.toInt()); setPadding(dp(8),dp(12),dp(8),dp(12)) }; panel=p
-        f.addView(p,FrameLayout.LayoutParams(dp(300),-1,Gravity.START)); p.addView(text(if(category==iptv && source==Source.FILE) files.firstOrNull { it.id==selectedFile }?.name ?: "KANALLAR" else if(category==iptv) source.title else "KANALLAR"))
+        f.addView(p,FrameLayout.LayoutParams(dp(300),-1,Gravity.START)); p.addView(text(if(category==iptv && source==Source.FILE) files.firstOrNull { it.id==selectedFile }?.name ?: "KANALLAR" else if(category==iptv) connections.firstOrNull { it.id==selectedConnection }?.name ?: source.title else "KANALLAR"))
         val lv=channelList(playing) { i->play(i); hideSide() }; p.addView(lv,LinearLayout.LayoutParams(-1,0,1f)); lv.requestFocus(); lv.setSelection(current)
     }
     private fun hideSide() { panel?.let { (it.parent as? FrameLayout)?.removeView(it) }; panel=null; screen?.requestFocus() }
@@ -199,21 +210,86 @@ class MainActivity : Activity() {
         body.lineSequence().forEach { raw -> val line=raw.trim().removePrefix("\uFEFF"); if(line.startsWith("#EXTINF:")) { name=line.substringAfterLast(',').trim(); g=gr.find(line)?.groupValues?.get(1)?.ifBlank { "Genel" } ?: "Genel" } else if(line.isNotBlank() && !line.startsWith("#")) { val u=try { if(base!=null) URL(URL(base),line).toString() else line } catch(e:Exception) { line }; if(u.startsWith("https://") || u.startsWith("http://")) result.add(Channel(name.ifBlank { "Kanal ${result.size+1}" },u,"IPTV",u.substringBefore('?').endsWith(".m3u8",true),g)); name=""; g="Genel" } }
         return result.distinctBy { it.url }
     }
-    private fun save(s:Source,a:List<Channel>) {
-        if(a.isEmpty()) { toast("IPTV kanalı bulunamadı"); return }; val target=lists.getValue(s); val merged=(target+a).distinctBy { it.url }
-        if(!write("iptv_saved",s.key,merged)) { toast("Liste kaydedilemedi"); return }; target.clear(); target.addAll(merged)
-        if(screen==null) { source=s; group="Tüm Kanallar"; render() }; toast("${s.title}: ${target.size} kanal")
+    private fun loadConnections() {
+        val prefs=getSharedPreferences("iptv_saved",MODE_PRIVATE)
+        try {
+            val raw=prefs.getString("connections_v1",null)
+            if(raw==null) {
+                listOf(Source.URL,Source.XTREAM).forEach { kind ->
+                    val old=lists.getValue(kind)
+                    if(old.isNotEmpty()) connections.add(Connection("old-${kind.name}","Mevcut ${kind.title}",kind,old.toList()))
+                }
+            } else {
+                val arr=JSONArray(raw)
+                for(i in 0 until arr.length()) {
+                    val o=arr.getJSONObject(i); val entries=o.getJSONArray("channels")
+                    val items=mutableListOf<Channel>()
+                    for(j in 0 until entries.length()) {
+                        val c=entries.getJSONObject(j)
+                        items.add(Channel(c.getString("name"),c.getString("url"),"IPTV",c.optBoolean("hls",false),c.optString("group","Genel")))
+                    }
+                    connections.add(Connection(o.getString("id"),o.getString("name"),Source.valueOf(o.getString("source")),items))
+                }
+            }
+            selectedConnection=connections.firstOrNull()?.id
+        } catch(e:Exception) { connectionsReadable=false; toast("Bağlantı kayıtları okunamadı; kayıtlar korunuyor") }
+    }
+    private fun storeConnections(items:List<Connection>):Boolean {
+        if(!connectionsReadable) return false
+        val arr=JSONArray()
+        items.forEach { c ->
+            val entries=JSONArray()
+            c.channels.forEach { ch -> entries.put(JSONObject().put("name",ch.name).put("url",ch.url).put("hls",ch.hls).put("group",ch.group)) }
+            arr.put(JSONObject().put("id",c.id).put("name",c.name).put("source",c.source.name).put("channels",entries))
+        }
+        return getSharedPreferences("iptv_saved",MODE_PRIVATE).edit().putString("connections_v1",arr.toString()).commit()
+    }
+    private fun persistConnections(items:List<Connection>) {
+        if(busy) { toast("Liste yükleniyor"); return }; busy=true
+        Thread {
+            val ok=try { storeConnections(items) } catch(e:Exception) { false }
+            runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) {
+                if(ok) { connections.clear(); connections.addAll(items); if(connections.none { it.id==selectedConnection }) selectedConnection=null; if(screen==null) render(); toast("Listeler kaydedildi") }
+                else toast("Kayıt başarısız; eski listeler korundu")
+            } }
+        }.start()
     }
     private fun fetch(u:String):Pair<String,String> { val c=URL(u).openConnection(); c.connectTimeout=20000; c.readTimeout=30000; val body=c.getInputStream().bufferedReader(Charsets.UTF_8).use { it.readText() }; return body to c.url.toString() }
-    private fun importUrl(u:String,s:Source) {
-        if(!u.startsWith("https://") && !u.startsWith("http://")) { toast("Geçerli URL girin"); return }; if(busy) { toast("Liste yükleniyor"); return }; busy=true
-        Thread { try { val (body,base)=fetch(u); val a=parse(body,base); runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) save(s,a) } } catch(e:Exception) { runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) toast("Bağlantı kurulamadı") } } }.start()
+    private fun importUrl(u:String,s:Source,name:String,id:String?=null) {
+        if(!u.startsWith("https://") && !u.startsWith("http://")) { toast("Geçerli URL girin"); return }
+        if(busy) { toast("Liste yükleniyor"); return }; busy=true
+        val key=id ?: java.util.UUID.randomUUID().toString()
+        val previous=connections.toList()
+        val progress=AlertDialog.Builder(this).setTitle("Liste yükleniyor").setMessage("Lütfen bekleyin...").setCancelable(false).create()
+        progress.show()
+        Thread {
+            var updated:List<Connection>?=null
+            val message=try {
+                val (body,base)=fetch(u); val a=parse(body,base)
+                if(a.isEmpty()) "IPTV kanalı bulunamadı" else {
+                    val next=previous.filter { it.id!=key }+Connection(key,name,s,a)
+                    if(storeConnections(next)) { updated=next; "${a.size} kanal kaydedildi" } else "Liste kaydedilemedi"
+                }
+            } catch(e:Exception) { "Bağlantı kurulamadı veya liste okunamadı" }
+            runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) {
+                progress.dismiss()
+                updated?.let { connections.clear(); connections.addAll(it); source=s; selectedConnection=key; group="Tüm Kanallar"; if(screen==null) render() }
+                toast(message)
+            } }
+        }.start()
     }
     private fun input(h:String)=EditText(this).apply { hint=h; setSingleLine(true); textSize=18f }
-    private fun m3u() { val e=input("M3U veya M3U8 URL"); AlertDialog.Builder(this).setTitle("M3U URL").setView(e).setPositiveButton("Bağlan") { _,_ -> importUrl(e.text.toString().trim(),Source.URL) }.setNegativeButton("İptal",null).show() }
-    private fun xtream() {
-        val l=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(12),dp(20),dp(12)) }; val h=input("Sunucu URL"); val u=input("Kullanıcı adı"); val p=input("Şifre"); p.inputType=129; l.addView(h); l.addView(u); l.addView(p)
-        AlertDialog.Builder(this).setTitle("Xtream Codes").setView(l).setPositiveButton("Bağlan") { _,_ -> val host=h.text.toString().trim().trimEnd('/'); val user=u.text.toString().trim(); val pass=p.text.toString(); if(host.isBlank() || user.isBlank() || pass.isBlank()) toast("Tüm alanları doldurun") else importUrl("$host/get.php?username=${URLEncoder.encode(user,"UTF-8")}&password=${URLEncoder.encode(pass,"UTF-8")}&type=m3u_plus&output=m3u8",Source.XTREAM) }.setNegativeButton("İptal",null).show()
+    private fun m3u(old:Connection?=null) {
+        val l=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(12),dp(20),dp(12)) }
+        val n=input("Liste adı"); n.setText(old?.name ?: "M3U ${connections.count { it.source==Source.URL }+1}")
+        val e=input("M3U veya M3U8 URL"); l.addView(n); l.addView(e)
+        AlertDialog.Builder(this).setTitle("M3U URL").setView(l).setPositiveButton("Bağlan") { _,_ -> importUrl(e.text.toString().trim(),Source.URL,n.text.toString().trim().ifBlank { "M3U URL" },old?.id) }.setNegativeButton("İptal",null).show()
+    }
+    private fun xtream(old:Connection?=null) {
+        val l=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(12),dp(20),dp(12)) }
+        val n=input("Liste adı"); n.setText(old?.name ?: "Xtream ${connections.count { it.source==Source.XTREAM }+1}")
+        val h=input("Sunucu URL"); val u=input("Kullanıcı adı"); val p=input("Şifre"); p.inputType=129; l.addView(n); l.addView(h); l.addView(u); l.addView(p)
+        AlertDialog.Builder(this).setTitle("Xtream Codes").setView(l).setPositiveButton("Bağlan") { _,_ -> val host=h.text.toString().trim().trimEnd('/'); val user=u.text.toString().trim(); val pass=p.text.toString(); if(host.isBlank() || user.isBlank() || pass.isBlank()) toast("Tüm alanları doldurun") else importUrl("$host/get.php?username=${URLEncoder.encode(user,"UTF-8")}&password=${URLEncoder.encode(pass,"UTF-8")}&type=m3u_plus&output=m3u8",Source.XTREAM,n.text.toString().trim().ifBlank { "Xtream Codes" },old?.id) }.setNegativeButton("İptal",null).show()
     }
     private fun pickFile() { try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="*/*" },501) } catch(e:Exception) { toast("Dosya seçici bulunamadı") } }
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
