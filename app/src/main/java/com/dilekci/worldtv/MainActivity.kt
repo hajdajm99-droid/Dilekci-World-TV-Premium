@@ -74,11 +74,11 @@ class MainActivity : Activity() {
         Channel("Tirol TV","https://streaming14.huberwebmedia.at/LiveApp/streams/livestream.m3u8","AT")
     )
     private val iptvTrial = "🧪 IPTV Deneme"
-    private val importedWorld = mutableListOf<Channel>()
-    private val importedIptv = mutableListOf<Channel>()
+    private var importedWorld: List<Channel> = emptyList()
+    private var importedIptv: List<Channel> = emptyList()
     private var trialQuery = ""
     private var trialCountry = "ALL"
-    private fun worldTrials() = (importedWorld + trials).distinctBy { it.url }
+    private fun worldTrials(): List<Channel> = dbList("world", includeCache=true)
     private fun searchTrial() {
         val e=input("Kanal adı"); e.setText(trialQuery)
         AlertDialog.Builder(this).setTitle("Kanal ara").setView(e).setPositiveButton("Ara") { _,_ -> trialQuery=e.text.toString().trim(); renderRight() }.setNegativeButton("İptal",null).show()
@@ -87,7 +87,7 @@ class MainActivity : Activity() {
         if(busy) { toast("Liste yükleniyor"); return }
         val key=if(isWorld) "world" else "iptv"
         AlertDialog.Builder(this).setMessage("Yüklenen deneme kanalları silinsin mi? Kalıcı kanallar korunur.").setPositiveButton("Sil") { _,_ ->
-            if(write("trial_imports",key,emptyList())) { (if(isWorld) importedWorld else importedIptv).clear(); render() }
+            if(clearDb(key)) { refreshDb(); render() }
         }.setNegativeButton("İptal",null).show()
     }
     private val allowed = mapOf(
@@ -115,9 +115,9 @@ class MainActivity : Activity() {
         read("world_tv_saved","channels","").filter { it.country in codes && it.url.startsWith("https://") }.forEach { c -> if(channels.none { same(it,c) }) { channels.add(c); saved.add(c) } }
         Source.values().filter { it!=Source.LEGACY }.forEach { lists.getValue(it).addAll(read("iptv_saved",it.key,"IPTV")) }
         loadConnections()
-        importedWorld.addAll(read("trial_imports","world","ZZ"))
-        trials.addAll(read("world_trial_cache","channels","ZZ"))
-        importedIptv.addAll(read("trial_imports","iptv","IPTV"))
+        migrateDb("world", "ZZ")
+        trials.addAll(read("world_trial_cache","channels","ZZ")); syncCache()
+        migrateDb("iptv", "IPTV"); refreshDb()
         loadFiles()
         source=connections.firstOrNull()?.source ?: Source.FILE
         binding.sectionContainer.removeAllViews(); binding.primaryAction.visibility=View.GONE; binding.secondaryAction.visibility=View.GONE
@@ -155,7 +155,7 @@ class MainActivity : Activity() {
             groups.forEach { g -> left.addView(item(g,16f) { group=g; renderRight() }) }
         } else {
             val all=if(category==trial) worldTrials() else channels; val collator=Collator.getInstance(tr)
-            val countries=all.map { it.country }.distinct().sortedWith { a,b -> collator.compare(countryName(a),countryName(b)) }
+            val countries=(if(category==trial) dbCountries() else all.map { it.country }.distinct()).sortedWith { a,b -> collator.compare(countryName(a),countryName(b)) }
             binding.contentDescription.text=if(trialBusy && category==trial) "${all.size} kanal • Liste güncelleniyor..." else "${all.size} kanal • ${countries.size} ülke" + if(category==trial) " • Kaydetmek için OK uzun basın" else ""
             if(category==trial) {
                 left.addView(item("📂 Dosya yükle",16f) { pickFile(502) })
@@ -175,7 +175,13 @@ class MainActivity : Activity() {
         renderRight()
     }
     private fun allIptv():List<Channel> = if(source==Source.FILE) files.firstOrNull { it.id==selectedFile }?.channels ?: emptyList() else connections.firstOrNull { it.id==selectedConnection && it.source==source }?.channels ?: emptyList()
-    private fun active():List<Channel> = when(category) { iptvTrial->if(trialQuery.isBlank()) importedIptv else importedIptv.filter { it.name.contains(trialQuery,true) }; iptv->allIptv().let { if(group=="Tüm Kanallar") it else it.filter { c->c.group==group } }; world->channels.filter { it.country==country }; trial->worldTrials().filter { if(trialQuery.isBlank()) trialCountry=="ALL" || it.country==trialCountry else it.name.contains(trialQuery,true) }; else->emptyList() }
+    private fun active():List<Channel> = when(category) {
+        iptvTrial -> dbList("iptv", query=trialQuery)
+        trial -> dbList("world", query=trialQuery, countryFilter=if(trialQuery.isBlank() && trialCountry!="ALL") trialCountry else null, includeCache=true)
+        iptv -> allIptv().let { if(group=="Tüm Kanallar") it else it.filter { c->c.group==group } }
+        world -> channels.filter { it.country==country }
+        else -> emptyList()
+    }
     private fun channelList(a:List<Channel>, action:(Int)->Unit)=ListView(this).apply {
         adapter=object:BaseAdapter() {
             override fun getCount()=a.size
@@ -219,7 +225,7 @@ class MainActivity : Activity() {
         Thread { val ok=try { storeFiles(items) } catch(e:Exception) { false }; runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) { if(ok) { files.clear(); files.addAll(items); if(screen==null) render() } else toast("Kayıt başarısız") } } }.start()
     }
     private fun openVideo(i:Int,displayed:List<Channel>) {
-        val a=if(displayed===importedIptv) displayed.toList() else displayed; if(i !in a.indices) return; closeVideo(); playing=a
+        val a=displayed; if(i !in a.indices) return; closeVideo(); playing=a
         val f=FrameLayout(this).apply { setBackgroundColor(0xFF000000.toInt()); isFocusable=true; isFocusableInTouchMode=true }; screen=f
         addContentView(f,FrameLayout.LayoutParams(-1,-1)); val pv=PlayerView(this).apply { useController=false }; f.addView(pv,FrameLayout.LayoutParams(-1,-1))
         val loadControl=androidx.media3.exoplayer.DefaultLoadControl.Builder().setBufferDurationsMs(20000,50000,2000,5000).setTargetBufferBytes(24*1024*1024).setPrioritizeTimeOverSizeThresholds(false).build()
@@ -245,20 +251,6 @@ class MainActivity : Activity() {
     }
     private fun hideSide() { panel?.let { (it.parent as? FrameLayout)?.removeView(it) }; panel=null; screen?.requestFocus() }
     private fun closeVideo() { retryHandler.removeCallbacksAndMessages(null); hideSide(); player?.release(); player=null; screen?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }; screen=null; playing=emptyList(); confirmed=false }
-    private fun importTrialFile(filename:String,items:List<Channel>,isWorld:Boolean) {
-        if(items.isEmpty()) { toast("Dosyada desteklenen kanal bulunamadı"); return }
-        if(busy) { toast("Liste yükleniyor"); return }; busy=true
-        val target=if(isWorld) importedWorld else importedIptv
-        val previous=target.toList()
-        Thread {
-            val next=try { mergeChannels(previous,items,if(isWorld) "ZZ" else "IPTV") } catch(e:Exception) { runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) toast(connectionError(e)) }; return@Thread }
-            val ok=try { write("trial_imports",if(isWorld) "world" else "iptv",next) } catch(e:Exception) { false }
-            runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) {
-                if(ok) { target.clear(); target.addAll(next); select(if(isWorld) trial else iptvTrial); toast("${items.size} kanal okundu: $filename") }
-                else toast("Kayıt başarısız")
-            } }
-        }.start()
-    }
     private fun saveTrial() {
         if(category!=trial && category!=iptvTrial) { toast("Kanal zaten listede"); return }
         val c=playing.getOrNull(current) ?: return
@@ -424,23 +416,19 @@ class MainActivity : Activity() {
     private fun importTrialUrl(u:String) {
         if(!u.startsWith("https://") && !u.startsWith("http://")) { toast("Geçerli URL girin"); return }
         if(busy) { toast("Liste yükleniyor"); return }; busy=true
-        val previous=importedIptv.toList()
-        val progress=AlertDialog.Builder(this).setTitle("Deneme listesi yükleniyor").setMessage("Lütfen bekleyin...").setCancelable(false).create()
-        progress.show()
+        val progress=AlertDialog.Builder(this).setTitle("Deneme listesi yükleniyor").setMessage("Lütfen bekleyin...").setCancelable(false).create(); progress.show()
         Thread {
-            var updated:List<Channel>?=null
             val message=try {
-                val items=fetchPlaylist(u)
-                if(items.isEmpty()) "Sunucu geçerli M3U listesi veya kanal döndürmedi" else {
-                    val next=mergeChannels(previous,items)
-                    if(write("trial_imports","iptv",next)) { updated=next; "${items.size} kanal deneme listesine alındı" } else "Deneme listesi kaydedilemedi"
-                }
+                val c=URL(u).openConnection() as java.net.HttpURLConnection
+                try {
+                    c.connectTimeout=30000; c.readTimeout=90000; c.instanceFollowRedirects=true
+                    c.setRequestProperty("User-Agent","DilekciWorldTV/1.0")
+                    val status=c.responseCode; if(status !in 200..299) throw HttpFailure(status)
+                    val n=c.inputStream.bufferedReader(Charsets.UTF_8).use { importDb("iptv",it,c.url.toString()) }
+                    "$n yeni kanal eklendi"
+                } finally { c.disconnect() }
             } catch(e:Exception) { connectionError(e) }
-            runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) {
-                progress.dismiss()
-                updated?.let { importedIptv.clear(); importedIptv.addAll(it); select(iptvTrial) }
-                toast(message)
-            } }
+            runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) { progress.dismiss(); refreshDb(); select(iptvTrial); toast(message) } }
         }.start()
     }
     private fun m3uTrial() {
@@ -451,7 +439,14 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
         super.onActivityResult(requestCode,resultCode,data); if(requestCode !in 501..503) return; if(resultCode!=RESULT_OK) { replacement=null; return }; val uri=data?.data ?: return; if(busy) { toast("Liste yükleniyor"); return }; busy=true
         Thread { try { val filename=contentResolver.query(uri,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),null,null,null)?.use { c -> if(c.moveToFirst()) c.getString(0) else null } ?: "M3U dosyası"
-            val a=contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { parse(it) } ?: error("Dosya okunamadı"); runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) if(requestCode==501) saveFile(filename,a) else importTrialFile(filename,a,requestCode==502) } } catch(e:Exception) { runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) toast(connectionError(e)) } } }.start()
+            if(requestCode==501) {
+                val a=contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { parse(it) } ?: error("Dosya okunamadı")
+                runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) saveFile(filename,a) }
+            } else {
+                val key=if(requestCode==502) "world" else "iptv"
+                val n=contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { importDb(key,it,null) } ?: error("Dosya okunamadı")
+                runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) { refreshDb(); select(if(requestCode==502) trial else iptvTrial); toast("$n yeni kanal: $filename") } }
+            } } catch(e:Exception) { runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) toast(connectionError(e)) } } }.start()
     }
     private fun loadFiles() {
         val prefs=getSharedPreferences("iptv_saved",MODE_PRIVATE)
@@ -504,7 +499,7 @@ class MainActivity : Activity() {
             body.lineSequence().forEach { raw -> val line=raw.trim(); if(line.startsWith("#EXTINF:")) { val g=gr.find(line)?.groupValues?.get(1) ?: ""; code=g.split(';').mapNotNull { part -> val n=part.trim(); countryLookup[n.lowercase(Locale.ROOT)] }.firstOrNull(); name=(nr.find(line)?.groupValues?.get(1)?.takeIf { it.isNotBlank() } ?: line.substringAfterLast(',')).replace(Regex("""\s*\(\d+p\)\s*""")," ").replace(Regex("""\s+""")," ").trim() } else if(line.startsWith("http://") || line.startsWith("https://")) { val c=code; if(c!=null && line.startsWith("https://") && allowed[c]?.split('|')?.any { it.equals(name,true) }==true) result.add(Channel(name,line,c)); code=null; name="" } }
             val fresh=result.distinctBy { it.country+"|"+it.url }
             if(fresh.isNotEmpty()) write("world_trial_cache","channels",fresh)
-            runOnUiThread { trialBusy=false; if(!isDestroyed && !isFinishing) { if(fresh.isNotEmpty()) { trials.clear(); trials.addAll(fresh); trialRefreshed=true }; if(category==trial && screen==null) render() } }
+            runOnUiThread { trialBusy=false; if(!isDestroyed && !isFinishing) { if(fresh.isNotEmpty()) { trials.clear(); trials.addAll(fresh); if(screen==null) syncCache(); trialRefreshed=true }; if(category==trial && screen==null) render() } }
         } catch(e:Exception) { runOnUiThread { trialBusy=false; if(!isDestroyed && !isFinishing && category==trial) binding.contentDescription.text="Liste yüklenemedi. Tekrar seçin." } } }.start()
     }
     override fun dispatchKeyEvent(event:KeyEvent):Boolean {
@@ -515,4 +510,90 @@ class MainActivity : Activity() {
         }; if(screen==null && category==iptv && source==Source.FILE && selectedFile!=null && event.keyCode==KeyEvent.KEYCODE_BACK && event.action==KeyEvent.ACTION_DOWN) { selectedFile=null; renderRight(); right?.getChildAt(1)?.requestFocus(); return true }; return super.dispatchKeyEvent(event)
     }
     override fun onDestroy() { closeVideo(); super.onDestroy() }
+
+    private val dbHelper by lazy {
+        object: android.database.sqlite.SQLiteOpenHelper(this, "dilekci_trial_v2.db", null, 1) {
+            override fun onCreate(db:android.database.sqlite.SQLiteDatabase) {
+                db.execSQL("CREATE TABLE ch(id INTEGER PRIMARY KEY AUTOINCREMENT, bucket TEXT NOT NULL, name TEXT NOT NULL, url TEXT NOT NULL, country TEXT NOT NULL, hls INTEGER NOT NULL, grp TEXT NOT NULL, UNIQUE(bucket,url))")
+                db.execSQL("CREATE INDEX ch_bucket_country ON ch(bucket,country,id)")
+                db.execSQL("CREATE TABLE migrated(bucket TEXT PRIMARY KEY)")
+            }
+            override fun onUpgrade(db:android.database.sqlite.SQLiteDatabase,oldVersion:Int,newVersion:Int) { error("Unsupported database version") }
+        }
+    }
+    private val db get() = dbHelper.writableDatabase
+    private fun insertDb(bucket:String,c:Channel):Boolean {
+        val v=android.content.ContentValues().apply { put("bucket",bucket); put("name",c.name); put("url",c.url); put("country",c.country); put("hls",if(c.hls) 1 else 0); put("grp",c.group) }
+        return db.insertWithOnConflict("ch",null,v,android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE)!=-1L
+    }
+    private fun migrateDb(bucket:String,defaultCountry:String) {
+        try {
+            if(db.rawQuery("SELECT 1 FROM migrated WHERE bucket=?",arrayOf(bucket)).use { it.moveToFirst() }) return
+            val raw=getSharedPreferences("trial_imports",MODE_PRIVATE).getString(bucket,"[]") ?: "[]"
+            db.beginTransaction()
+            try {
+                android.util.JsonReader(java.io.StringReader(raw)).use { r ->
+                    r.beginArray(); while(r.hasNext()) {
+                        var name=""; var url=""; var country=defaultCountry; var hls=false; var grp="Genel"
+                        r.beginObject(); while(r.hasNext()) when(r.nextName()) {
+                            "name" -> name=r.nextString(); "url" -> url=r.nextString(); "country" -> country=r.nextString(); "hls" -> hls=r.nextBoolean(); "group" -> grp=r.nextString(); else -> r.skipValue()
+                        }; r.endObject(); if(url.isNotBlank()) insertDb(bucket,Channel(name,url,country,hls,grp))
+                    }; r.endArray()
+                }
+                db.execSQL("INSERT INTO migrated(bucket) VALUES(?)",arrayOf<Any>(bucket)); db.setTransactionSuccessful()
+            } finally { db.endTransaction() }
+        } catch(e:Exception) { toast("Eski deneme kayıtları aktarılamadı; orijinal kayıtlar korundu") }
+    }
+    private fun syncCache() {
+        db.beginTransaction(); try { db.delete("ch","bucket=?",arrayOf("cache")); trials.forEach { insertDb("cache",it) }; db.setTransactionSuccessful() } finally { db.endTransaction() }
+    }
+    private fun clearDb(bucket:String):Boolean = try { db.delete("ch","bucket=?",arrayOf(bucket)); true } catch(e:Exception) { toast("Liste silinemedi"); false }
+    private fun refreshDb() { importedWorld=dbList("world"); importedIptv=dbList("iptv") }
+    private fun dbCountries():List<String> = db.rawQuery("SELECT DISTINCT country FROM ch WHERE bucket IN ('world','cache')",null).use { c -> val out=mutableListOf<String>(); while(c.moveToNext()) out.add(c.getString(0)); out }
+    private fun dbList(bucket:String,query:String="",countryFilter:String?=null,includeCache:Boolean=false):List<Channel> {
+        val args=mutableListOf(bucket)
+        var where=if(includeCache) "(bucket=? OR (bucket='cache' AND NOT EXISTS (SELECT 1 FROM ch AS w WHERE w.bucket='world' AND w.url=ch.url)))" else "bucket=?"
+        if(countryFilter!=null) { where+=" AND country=?"; args.add(countryFilter) }
+        if(query.isNotBlank()) { where+=" AND instr(lower(name),lower(?))>0"; args.add(query) }
+        val ids=db.rawQuery("SELECT id FROM ch WHERE $where ORDER BY CASE WHEN bucket='cache' THEN 1 ELSE 0 END,id",args.toTypedArray()).use { c -> LongArray(c.count).also { a -> var i=0; while(c.moveToNext()) a[i++]=c.getLong(0) } }
+        return object:AbstractList<Channel>() {
+            override val size:Int get()=ids.size
+            private val cache=android.util.LruCache<Long,Channel>(200)
+            override fun get(index:Int):Channel {
+                val id=ids[index]; cache.get(id)?.let { return it }
+                return db.rawQuery("SELECT name,url,country,hls,grp FROM ch WHERE id=?",arrayOf(id.toString())).use { c ->
+                    if(!c.moveToFirst()) throw IndexOutOfBoundsException("Channel removed")
+                    Channel(c.getString(0),c.getString(1),c.getString(2),c.getInt(3)!=0,c.getString(4)).also { cache.put(id,it) }
+                }
+            }
+        }
+    }
+    private fun importDb(bucket:String,reader:java.io.BufferedReader,base:String?):Int {
+        val root=base?.let { URL(it) }; val country=if(bucket=="world") "ZZ" else "IPTV"
+        val gr=Regex("group-title=\"([^\"]*)\"",RegexOption.IGNORE_CASE)
+        var name=""; var grp="Genel"; var first=true; var total=0L; var added=0; var count=0
+        db.beginTransaction()
+        try {
+            count=db.rawQuery("SELECT count(*) FROM ch WHERE bucket=?",arrayOf(bucket)).use { it.moveToFirst(); it.getInt(0) }
+            while(true) {
+                val raw=reader.readLine() ?: break; total+=raw.length+1L
+                if(total>256L*1024*1024 || raw.length>65536) throw ListLimit()
+                val line=raw.trim().removePrefix("\uFEFF").trim(); if(line.isEmpty()) continue
+                if(first) { first=false; if(base!=null && !line.startsWith("#EXTM3U",true)) error("M3U header") }
+                if(line.startsWith("#EXT-X-TARGETDURATION") || line.startsWith("#EXT-X-STREAM-INF")) {
+                    if(base==null || added>0) error("HLS playlist")
+                    if(insertDb(bucket,Channel("HLS Yayını",base,country,true))) { added++; count++ }; if(count>150000) throw ListLimit(); break
+                }
+                if(line.startsWith("#EXTINF:")) { name=line.substringAfterLast(',').trim(); grp=gr.find(line)?.groupValues?.get(1)?.ifBlank { "Genel" } ?: "Genel" }
+                else if(!line.startsWith("#")) {
+                    val u=try { if(root!=null) URL(root,line).toString() else line } catch(e:Exception) { line }
+                    if(u.startsWith("https://") || u.startsWith("http://")) {
+                        if(insertDb(bucket,Channel(name.ifBlank { "Kanal ${count+1}" },u,country,u.substringBefore('?').endsWith(".m3u8",true),grp))) { count++; added++; if(count>150000) throw ListLimit() }
+                    }; name=""; grp="Genel"
+                }
+            }
+            db.setTransactionSuccessful(); return added
+        } finally { db.endTransaction() }
+    }
+
 }
