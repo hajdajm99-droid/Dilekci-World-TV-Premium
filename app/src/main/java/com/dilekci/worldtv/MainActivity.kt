@@ -379,26 +379,37 @@ class MainActivity : Activity() {
     private fun fetch(u:String):Pair<String,String> {
         return try { fetchOnce(u) } catch(e:java.net.SocketTimeoutException) { fetchOnce(u) }
     }
+    private fun openPlaylistConnection(address:String):java.net.HttpURLConnection {
+        var target=URL(address)
+        repeat(8) {
+            if(target.protocol !in listOf("http","https")) throw java.io.IOException("Unsupported protocol")
+            val c=target.openConnection() as java.net.HttpURLConnection
+            try {
+                c.connectTimeout=30000; c.readTimeout=90000
+                c.instanceFollowRedirects=false
+                c.setRequestProperty("User-Agent","DilekciWorldTV/1.0")
+                val status=c.responseCode
+                if(status in 200..299) return c
+                if(status !in listOf(301,302,303,307,308)) throw HttpFailure(status)
+                val location=c.getHeaderField("Location") ?: throw HttpFailure(status)
+                val next=URL(target,location)
+                if(target.protocol=="https" && next.protocol!="https") throw java.io.IOException("HTTPS downgrade blocked")
+                target=next
+            } catch(e:Exception) { c.disconnect(); throw e }
+            c.disconnect()
+        }
+        throw java.io.IOException("Too many redirects")
+    }
     private fun fetchOnce(u:String):Pair<String,String> {
-        val c=URL(u).openConnection() as java.net.HttpURLConnection
+        val c=openPlaylistConnection(u)
         try {
-            c.connectTimeout=30000; c.readTimeout=90000
-            c.instanceFollowRedirects=true
-            c.setRequestProperty("User-Agent","DilekciWorldTV/1.0")
-            val status=c.responseCode
-            if(status !in 200..299) throw HttpFailure(status)
             val body=c.inputStream.bufferedReader(Charsets.UTF_8).use { readLimited(it) }
             return body to c.url.toString()
         } finally { c.disconnect() }
     }
     private fun fetchPlaylist(u:String):List<Channel> {
-        val c=URL(u).openConnection() as java.net.HttpURLConnection
+        val c=openPlaylistConnection(u)
         try {
-            c.connectTimeout=30000; c.readTimeout=90000
-            c.instanceFollowRedirects=true
-            c.setRequestProperty("User-Agent","DilekciWorldTV/1.0")
-            val status=c.responseCode
-            if(status !in 200..299) throw HttpFailure(status)
             return c.inputStream.bufferedReader(Charsets.UTF_8).use { parse(it,c.url.toString(),true) }
         } finally { c.disconnect() }
     }
@@ -419,11 +430,8 @@ class MainActivity : Activity() {
         val progress=AlertDialog.Builder(this).setTitle("Deneme listesi yükleniyor").setMessage("Lütfen bekleyin...").setCancelable(false).create(); progress.show()
         Thread {
             val message=try {
-                val c=URL(u).openConnection() as java.net.HttpURLConnection
+                val c=openPlaylistConnection(u)
                 try {
-                    c.connectTimeout=30000; c.readTimeout=90000; c.instanceFollowRedirects=true
-                    c.setRequestProperty("User-Agent","DilekciWorldTV/1.0")
-                    val status=c.responseCode; if(status !in 200..299) throw HttpFailure(status)
                     val n=c.inputStream.bufferedReader(Charsets.UTF_8).use { importDb("iptv",it,c.url.toString()) }
                     "$n yeni kanal eklendi"
                 } finally { c.disconnect() }
