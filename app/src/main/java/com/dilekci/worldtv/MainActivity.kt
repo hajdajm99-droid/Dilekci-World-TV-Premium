@@ -219,7 +219,7 @@ class MainActivity : Activity() {
         Thread { val ok=try { storeFiles(items) } catch(e:Exception) { false }; runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) { if(ok) { files.clear(); files.addAll(items); if(screen==null) render() } else toast("Kayıt başarısız") } } }.start()
     }
     private fun openVideo(i:Int,displayed:List<Channel>) {
-        val a=displayed.toList(); if(i !in a.indices) return; closeVideo(); playing=a
+        val a=if(displayed===importedIptv) displayed.toList() else displayed; if(i !in a.indices) return; closeVideo(); playing=a
         val f=FrameLayout(this).apply { setBackgroundColor(0xFF000000.toInt()); isFocusable=true; isFocusableInTouchMode=true }; screen=f
         addContentView(f,FrameLayout.LayoutParams(-1,-1)); val pv=PlayerView(this).apply { useController=false }; f.addView(pv,FrameLayout.LayoutParams(-1,-1))
         val loadControl=androidx.media3.exoplayer.DefaultLoadControl.Builder().setBufferDurationsMs(20000,50000,2000,5000).setTargetBufferBytes(24*1024*1024).setPrioritizeTimeOverSizeThresholds(false).build()
@@ -251,7 +251,7 @@ class MainActivity : Activity() {
         val target=if(isWorld) importedWorld else importedIptv
         val previous=target.toList()
         Thread {
-            val next=(previous+items.map { it.copy(country=if(isWorld) "ZZ" else "IPTV") }).distinctBy { it.url }
+            val next=try { mergeChannels(previous,items,if(isWorld) "ZZ" else "IPTV") } catch(e:Exception) { runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) toast(connectionError(e)) }; return@Thread }
             val ok=try { write("trial_imports",if(isWorld) "world" else "iptv",next) } catch(e:Exception) { false }
             runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) {
                 if(ok) { target.clear(); target.addAll(next); select(if(isWorld) trial else iptvTrial); toast("${items.size} kanal okundu: $filename") }
@@ -294,11 +294,41 @@ class MainActivity : Activity() {
                     }.setNegativeButton("İptal",null).show()
             }.setNegativeButton("İptal",null).show()
     }
-    private fun parse(body:String,base:String?=null):List<Channel> {
-        if(body.contains("#EXT-X-TARGETDURATION") || body.contains("#EXT-X-STREAM-INF")) return if(base!=null) listOf(Channel("HLS Yayını",base,"IPTV",true)) else emptyList()
-        val result=mutableListOf<Channel>(); var name=""; var g="Genel"; val gr=Regex("group-title=\"([^\"]*)\"",RegexOption.IGNORE_CASE)
-        body.lineSequence().forEach { raw -> val line=raw.trim().removePrefix("\uFEFF"); if(line.startsWith("#EXTINF:")) { name=line.substringAfterLast(',').trim(); g=gr.find(line)?.groupValues?.get(1)?.ifBlank { "Genel" } ?: "Genel" } else if(line.isNotBlank() && !line.startsWith("#")) { val u=try { if(base!=null) URL(URL(base),line).toString() else line } catch(e:Exception) { line }; if(u.startsWith("https://") || u.startsWith("http://")) result.add(Channel(name.ifBlank { "Kanal ${result.size+1}" },u,"IPTV",u.substringBefore('?').endsWith(".m3u8",true),g)); name=""; g="Genel" } }
-        return result.distinctBy { it.url }
+    private class ListLimit: java.io.IOException()
+    private fun parse(reader:java.io.BufferedReader,base:String?=null,requireHeader:Boolean=false):List<Channel> {
+        val result=ArrayList<Channel>(); val seen=HashSet<String>()
+        var name=""; var g="Genel"; var first=true; var total=0L
+        val gr=Regex("group-title=\"([^\"]*)\"",RegexOption.IGNORE_CASE)
+        val root=base?.let { URL(it) }
+        while(true) {
+            val raw=reader.readLine() ?: break
+            total+=raw.length.toLong()+1
+            if(total>64L*1024*1024) throw ListLimit()
+            val line=raw.trim().removePrefix("\uFEFF").trim()
+            if(line.isEmpty()) continue
+            if(first) { first=false; if(requireHeader && !line.startsWith("#EXTM3U",true)) return emptyList() }
+            if(line.startsWith("#EXT-X-TARGETDURATION") || line.startsWith("#EXT-X-STREAM-INF")) return if(base!=null) listOf(Channel("HLS Yayını",base,"IPTV",true)) else emptyList()
+            if(line.startsWith("#EXTINF:")) {
+                name=line.substringAfterLast(',').trim(); g=gr.find(line)?.groupValues?.get(1)?.ifBlank { "Genel" } ?: "Genel"
+            } else if(!line.startsWith("#")) {
+                val u=try { if(root!=null) URL(root,line).toString() else line } catch(e:Exception) { line }
+                if((u.startsWith("https://") || u.startsWith("http://")) && seen.add(u)) {
+                    if(result.size>=50000) throw ListLimit()
+                    result.add(Channel(name.ifBlank { "Kanal ${result.size+1}" },u,"IPTV",u.substringBefore('?').endsWith(".m3u8",true),g))
+                }
+                name=""; g="Genel"
+            }
+        }
+        return result
+    }
+    private fun mergeChannels(previous:List<Channel>,items:List<Channel>,countryCode:String?=null):List<Channel> {
+        val result=ArrayList<Channel>(); val seen=HashSet<String>()
+        for(c in previous) if(seen.add(c.url)) result.add(c)
+        for(c in items) if(seen.add(c.url)) {
+            if(result.size>=50000) throw ListLimit()
+            result.add(if(countryCode!=null && c.country!=countryCode) c.copy(country=countryCode) else c)
+        }
+        return result
     }
     private fun loadConnections() {
         val prefs=getSharedPreferences("iptv_saved",MODE_PRIVATE)
@@ -369,7 +399,19 @@ class MainActivity : Activity() {
             return body to c.url.toString()
         } finally { c.disconnect() }
     }
+    private fun fetchPlaylist(u:String):List<Channel> {
+        val c=URL(u).openConnection() as java.net.HttpURLConnection
+        try {
+            c.connectTimeout=30000; c.readTimeout=90000
+            c.instanceFollowRedirects=true
+            c.setRequestProperty("User-Agent","DilekciWorldTV/1.0")
+            val status=c.responseCode
+            if(status !in 200..299) throw HttpFailure(status)
+            return c.inputStream.bufferedReader(Charsets.UTF_8).use { parse(it,c.url.toString(),true) }
+        } finally { c.disconnect() }
+    }
     private fun connectionError(e:Exception):String = when(e) {
+        is ListLimit -> "Liste güvenli boyut sınırını aşıyor; eski kayıtlar korundu"
         is HttpFailure -> "Sunucu yanıtı: HTTP ${e.status}"
         is java.net.UnknownHostException -> "Sunucu adresi bulunamadı (DNS)"
         is java.net.SocketTimeoutException -> "Bağlantı zaman aşımına uğradı"
@@ -388,9 +430,9 @@ class MainActivity : Activity() {
         Thread {
             var updated:List<Channel>?=null
             val message=try {
-                val (body,base)=fetch(u); val items=if(body.trimStart().removePrefix("\uFEFF").trimStart().startsWith("#EXTM3U",true)) parse(body,base) else emptyList()
+                val items=fetchPlaylist(u)
                 if(items.isEmpty()) "Sunucu geçerli M3U listesi veya kanal döndürmedi" else {
-                    val next=(previous+items).distinctBy { it.url }
+                    val next=mergeChannels(previous,items)
                     if(write("trial_imports","iptv",next)) { updated=next; "${items.size} kanal deneme listesine alındı" } else "Deneme listesi kaydedilemedi"
                 }
             } catch(e:Exception) { connectionError(e) }
@@ -409,7 +451,7 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
         super.onActivityResult(requestCode,resultCode,data); if(requestCode !in 501..503) return; if(resultCode!=RESULT_OK) { replacement=null; return }; val uri=data?.data ?: return; if(busy) { toast("Liste yükleniyor"); return }; busy=true
         Thread { try { val filename=contentResolver.query(uri,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),null,null,null)?.use { c -> if(c.moveToFirst()) c.getString(0) else null } ?: "M3U dosyası"
-            val body=contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { readLimited(it) } ?: error("Dosya okunamadı"); val a=parse(body); runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) if(requestCode==501) saveFile(filename,a) else importTrialFile(filename,a,requestCode==502) } } catch(e:Exception) { runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) toast("Dosya okunamadı") } } }.start()
+            val a=contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { parse(it) } ?: error("Dosya okunamadı"); runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) if(requestCode==501) saveFile(filename,a) else importTrialFile(filename,a,requestCode==502) } } catch(e:Exception) { runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) toast(connectionError(e)) } } }.start()
     }
     private fun loadFiles() {
         val prefs=getSharedPreferences("iptv_saved",MODE_PRIVATE)
