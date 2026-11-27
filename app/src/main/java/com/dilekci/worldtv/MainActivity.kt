@@ -21,7 +21,7 @@ class MainActivity : Activity() {
     private val world = "🌍 Dünya TV"
     private val trial = "🧪 Dünya TV Deneme"
     private val iptv = "📡 IPTV"
-    private val magDemo = "🧪 MAG Deneme"
+    private val magDemo = "📺 MAG TV"
     private val settings = "⚙️ Ayarlar"
     private var group = "Tüm Kanallar"
     private var replacement: String? = null
@@ -72,8 +72,38 @@ class MainActivity : Activity() {
         Channel("W24","https://ms01.w24.at/W24/smil:liveevent.smil/playlist.m3u8","AT"),
         Channel("Tirol TV","https://streaming14.huberwebmedia.at/LiveApp/streams/livestream.m3u8","AT")
     )
-    private val magDemoChannels by lazy {
-        channels.filter { it.name in setOf("DW English", "Savoir Média", "France 24 English") }.map { it.copy(group="Deneme", hls=true) }
+    // Separate catalog snapshot: user IPTV and saved World TV entries are not imported.
+    private val magDemoChannels = channels.map { it.copy(group="MAG TV", hls=true) }
+    private var magCountry = "DE"
+    private var magMode = "country"
+    private var magQuery = ""
+    private val magFavorites = mutableSetOf<String>()
+    private fun magActive():List<Channel> = when(magMode) {
+        "favorites" -> magDemoChannels.filter { it.url in magFavorites }
+        "search" -> magDemoChannels.filter { it.name.lowercase(tr).contains(magQuery.lowercase(tr)) || countryName(it.country).lowercase(tr).contains(magQuery.lowercase(tr)) }
+        "all" -> magDemoChannels
+        else -> magDemoChannels.filter { it.country==magCountry }
+    }
+    private fun magHeading():String = when(magMode) {
+        "favorites" -> "⭐ Favoriler"
+        "search" -> "Arama: $magQuery"
+        "all" -> "Tüm Kanallar"
+        else -> "${flag(magCountry)} ${countryName(magCountry)}"
+    }
+    private fun magSearch() {
+        val e=input("Kanal veya ülke adı"); e.setText(magQuery)
+        AlertDialog.Builder(this).setTitle("Kanal ara").setView(e)
+            .setPositiveButton("Ara") { _,_ -> magQuery=e.text.toString().trim(); magMode="search"; renderRight() }
+            .setNegativeButton("İptal",null).show()
+    }
+    private fun toggleMagFavorite(c:Channel) {
+        val next=magFavorites.toMutableSet()
+        val added=if(c.url in next) { next.remove(c.url); false } else { next.add(c.url); true }
+        if(getSharedPreferences("mag_tv_saved",MODE_PRIVATE).edit().putStringSet("favorites",next).commit()) {
+            magFavorites.clear(); magFavorites.addAll(next)
+            toast(if(added) "Favorilere eklendi" else "Favorilerden çıkarıldı")
+            if(screen==null) renderRight()
+        } else toast("Favori kaydedilemedi")
     }
     private val allowed = mapOf(
         "TR" to "TRT Haber|TRT World|TRT Belgesel|TRT EBA TV", "DE" to "DW English|DW Deutsch|DW Español|tagesschau24", "FR" to "France 24 English|France 24 French|France 24 Arabic|France 24 Spanish|Franceinfo", "GB" to "Sky News|BBC News", "US" to "CBS News|CBS News 24/7|ABC News Live|NBC News NOW|NASA TV|NASA+|PBS NewsHour", "CA" to "Savoir Média|CBC News|CBC News Explore", "AU" to "ABC News|ABC News Australia", "JP" to "NHK WORLD-JAPAN|NHK World Japan", "KR" to "Arirang TV|Arirang World|KBS World", "AT" to "oe24 TV|W24|Tirol TV", "CH" to "SRF info", "IT" to "Rai News 24", "ES" to "Canal 24 Horas|24h", "PT" to "RTP Notícias|RTP Internacional", "MX" to "Canal Once|Canal 22", "RO" to "TVR International|TVR Info", "GR" to "ERT News|ERT World", "IN" to "DD News|DD India", "SG" to "CNA|Channel NewsAsia", "NZ" to "RNZ", "BR" to "TV Brasil|TV Cultura", "AR" to "Canal Encuentro", "CL" to "24 Horas", "FI" to "Yle TV1", "NO" to "NRK1", "SE" to "SVT24", "NL" to "NPO Nieuws", "BE" to "VRT NWS", "ZA" to "SABC News", "KE" to "KBC Channel 1", "ID" to "TVRI World", "TH" to "Thai PBS", "MY" to "Bernama TV"
@@ -100,7 +130,7 @@ class MainActivity : Activity() {
         read("world_tv_saved","channels","").filter { it.country in codes && it.url.startsWith("https://") }.forEach { c -> if(channels.none { same(it,c) }) { channels.add(c); saved.add(c) } }
         Source.values().filter { it!=Source.LEGACY && it!=Source.FILE }.forEach { lists.getValue(it).addAll(read("iptv_saved",it.key,"IPTV")) }
         loadConnections()
-        loadMag()
+        magFavorites.addAll(getSharedPreferences("mag_tv_saved",MODE_PRIVATE).getStringSet("favorites",emptySet()) ?: emptySet())
         loadFiles()
         if(filesReadable && storeFiles(files.filter { it.id!="legacy-file" })) { files.removeAll { it.id=="legacy-file" }; getSharedPreferences("iptv_saved",MODE_PRIVATE).edit().remove("channels").remove("file_channels").apply() }
         source=connections.firstOrNull()?.source ?: Source.XTREAM
@@ -122,9 +152,15 @@ class MainActivity : Activity() {
         row.addView(ScrollView(this).apply { addView(left) },LinearLayout.LayoutParams(0,-1,1f))
         row.addView(r,LinearLayout.LayoutParams(0,-1,1.5f)); right=r
         if(category==magDemo) {
-            binding.contentDescription.text="Yerel deneme • Gerçek MAG hesabı kullanılmaz"
-            left.addView(text("DENEME KANALLARI"))
-            left.addView(item("Tüm Kanallar",16f) { renderRight() })
+            val collator=Collator.getInstance(tr)
+            val countries=magDemoChannels.map { it.country }.distinct().sortedWith { a,b -> collator.compare(countryName(a),countryName(b)) }
+            binding.contentDescription.text="${magDemoChannels.size} kanal • ${countries.size} ülke • Favori için OK uzun basın"
+            left.addView(text("ÜLKELER"))
+            left.addView(item("🔍 Kanal ara",16f) { magSearch() })
+            left.addView(item("⭐ Favoriler",16f) { magMode="favorites"; renderRight() })
+            left.addView(item("Tüm Kanallar",16f) { magMode="all"; renderRight() })
+            if(magCountry !in countries) magCountry=countries.firstOrNull() ?: "DE"
+            countries.forEach { c -> left.addView(item("${flag(c)} ${countryName(c)}",16f) { magCountry=c; magMode="country"; renderRight() }) }
         } else if(category==iptv) {
             val f=files.firstOrNull { it.id==selectedFile }
             binding.contentTitle.text=if(source==Source.FILE) f?.name ?: "IPTV" else connections.firstOrNull { it.id==selectedConnection }?.name ?: source.title
@@ -144,7 +180,7 @@ class MainActivity : Activity() {
         renderRight()
     }
     private fun allIptv():List<Channel> = if(source==Source.FILE) files.firstOrNull { it.id==selectedFile }?.channels ?: emptyList() else connections.firstOrNull { it.id==selectedConnection && it.source==source }?.channels ?: emptyList()
-    private fun active():List<Channel> = when(category) { magDemo->magDemoChannels; iptv->allIptv().let { if(group=="Tüm Kanallar") it else it.filter { c->c.group==group } }; world->channels.filter { it.country==country }; trial->trials.filter { it.country==country }; else->emptyList() }
+    private fun active():List<Channel> = when(category) { magDemo->magActive(); iptv->allIptv().let { if(group=="Tüm Kanallar") it else it.filter { c->c.group==group } }; world->channels.filter { it.country==country }; trial->trials.filter { it.country==country }; else->emptyList() }
     private fun channelList(a:List<Channel>, action:(Int)->Unit)=ListView(this).apply {
         adapter=object:BaseAdapter() {
             override fun getCount()=a.size
@@ -152,13 +188,14 @@ class MainActivity : Activity() {
             override fun getItemId(position:Int)=position.toLong()
             override fun getView(position:Int,convertView:View?,parent:ViewGroup?):View {
                 val v=convertView as? TextView ?: this@MainActivity.text("")
-                v.text="${position+1}. ${a[position].name}"; return v
+                val c=a[position]
+                v.text=if(category==magDemo) "${position+1}. ${flag(c.country)} ${c.name}${if(c.url in magFavorites) " ⭐" else ""}" else "${position+1}. ${c.name}"; return v
             }
         }
         setOnItemClickListener { _,_,i,_->action(i) }
     }
     private fun renderRight() {
-        val r=right ?: return; r.removeAllViews(); r.addView(text(if(category==magDemo) "MAG DENEME KANALLARI" else if(category==iptv) "KANAL LİSTESİ" else countryName(country)))
+        val r=right ?: return; r.removeAllViews(); r.addView(text(if(category==magDemo) magHeading() else if(category==iptv) "KANAL LİSTESİ" else countryName(country)))
         val a=active(); if(a.isEmpty()) r.addView(text("Henüz kanal bulunamadı."))
         else r.addView(channelList(a) { openVideo(it) },LinearLayout.LayoutParams(-1,0,1f))
     }
@@ -166,17 +203,9 @@ class MainActivity : Activity() {
         binding.contentTitle.text="IPTV BAĞLANTI AYARLARI"; binding.contentDescription.text="Yüklenen listeleri yönet"
         val l=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; val r=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         row.addView(ScrollView(this).apply { addView(l) },LinearLayout.LayoutParams(0,-1,1f)); row.addView(ScrollView(this).apply { addView(r) },LinearLayout.LayoutParams(0,-1,1.5f))
-        l.addView(item("Xtream Codes Ekle",16f) { xtream() }); l.addView(item("M3U / M3U8 URL Ekle",16f) { m3u() }); l.addView(item("Dosyadan Yükle",16f) { pickFile() }); l.addView(item("MAG / Stalker Portal",16f) { magDialog() })
-        l.addView(item("MAG Deneme Kanalları",16f) { select(magDemo) })
+        l.addView(item("Xtream Codes Ekle",16f) { xtream() }); l.addView(item("M3U / M3U8 URL Ekle",16f) { m3u() }); l.addView(item("Dosyadan Yükle",16f) { pickFile() })
+        l.addView(item("MAG TV",16f) { select(magDemo) })
         r.addView(text("YÜKLENEN LİSTELER"))
-        magRecords.forEach { m -> r.addView(item("MAG: ${m.name}",16f) {
-            AlertDialog.Builder(this).setTitle(m.name).setItems(arrayOf("Aç","Değiştir","Sil")) { _,i -> when(i) {
-                0 -> testMag(m)
-                1 -> magDialog(m)
-                2 -> AlertDialog.Builder(this).setMessage("MAG kaydı silinsin mi?").setPositiveButton("Sil") { _,_ -> saveMag(magRecords.filter { it.id!=m.id }) }.setNegativeButton("İptal",null).show()
-            } }.show()
-        }) }
-
         connections.forEach { c -> r.addView(item("${c.source.title}: ${c.name}",16f) {
             AlertDialog.Builder(this).setTitle(c.name).setItems(arrayOf("Aç","Değiştir","Sil")) { _,i -> when(i) {
                 0 -> { source=c.source; selectedConnection=c.id; group="Tüm Kanallar"; select(iptv) }
@@ -309,76 +338,6 @@ class MainActivity : Activity() {
         val h=input("Sunucu URL"); val u=input("Kullanıcı adı"); val p=input("Şifre"); p.inputType=129; l.addView(n); l.addView(h); l.addView(u); l.addView(p)
         AlertDialog.Builder(this).setTitle("Xtream Codes").setView(l).setPositiveButton("Bağlan") { _,_ -> val host=h.text.toString().trim().trimEnd('/'); val user=u.text.toString().trim(); val pass=p.text.toString(); if(host.isBlank() || user.isBlank() || pass.isBlank()) toast("Tüm alanları doldurun") else importUrl("$host/get.php?username=${URLEncoder.encode(user,"UTF-8")}&password=${URLEncoder.encode(pass,"UTF-8")}&type=m3u_plus&output=m3u8",Source.XTREAM,n.text.toString().trim().ifBlank { "Xtream Codes" },old?.id) }.setNegativeButton("İptal",null).show()
     }
-    private data class MagRecord(val id:String,val name:String,val portal:String,val mac:String)
-    private val magRecords=mutableListOf<MagRecord>()
-    private var magReadable=true
-    private fun loadMag() {
-        try {
-            val a=JSONArray(getSharedPreferences("mag_saved",MODE_PRIVATE).getString("records","[]") ?: "[]")
-            for(i in 0 until a.length()) { val o=a.getJSONObject(i); magRecords.add(MagRecord(o.getString("id"),o.getString("name"),o.getString("portal"),o.getString("mac"))) }
-        } catch(e:Exception) { magReadable=false; toast("MAG kayıtları okunamadı") }
-    }
-    private fun saveMag(items:List<MagRecord>) {
-        if(!magReadable) { toast("Eski MAG kayıtları korunuyor"); return }
-        val a=JSONArray(); items.forEach { a.put(JSONObject().put("id",it.id).put("name",it.name).put("portal",it.portal).put("mac",it.mac)) }
-        if(getSharedPreferences("mag_saved",MODE_PRIVATE).edit().putString("records",a.toString()).commit()) {
-            magRecords.clear(); magRecords.addAll(items); render(); toast("MAG kayıtları güncellendi")
-        } else toast("MAG kaydedilemedi")
-    }
-    private fun testMag(record:MagRecord) {
-        if(busy) { toast("Bir işlem devam ediyor"); return }
-        busy=true
-        val progress=AlertDialog.Builder(this).setTitle("MAG bağlantı testi").setMessage("Sunucu kontrol ediliyor...").setCancelable(false).create()
-        progress.show()
-        Thread {
-            var connection:java.net.HttpURLConnection?=null
-            val result=try {
-                val url=URL(record.portal)
-                val c=url.openConnection() as java.net.HttpURLConnection
-                connection=c
-                c.instanceFollowRedirects=false
-                c.requestMethod="GET"
-                c.connectTimeout=12000
-                c.readTimeout=12000
-                val status=c.responseCode
-                when(status) {
-                    in 200..299 -> "HTTP $status: Sunucu yanıt verdi. MAG oturumu henüz doğrulanmadı."
-                    in 300..399 -> "HTTP $status: Sunucu yönlendirme istiyor."
-                    401,403 -> "HTTP $status: Sunucu yetkilendirme istiyor veya erişimi reddetti."
-                    404 -> "HTTP 404: Portal adresi bulunamadı."
-                    else -> "HTTP $status: Sunucu yanıt verdi."
-                }
-            } catch(e:java.net.UnknownHostException) { "Sunucu adresi çözümlenemedi." }
-            catch(e:java.net.SocketTimeoutException) { "Bağlantı zaman aşımına uğradı." }
-            catch(e:javax.net.ssl.SSLException) { "Güvenli bağlantı kurulamadı." }
-            catch(e:Exception) { "Sunucuya bağlantı kurulamadı." }
-            finally { connection?.disconnect() }
-            runOnUiThread {
-                busy=false
-                if(!isDestroyed && !isFinishing) {
-                    progress.dismiss()
-                    AlertDialog.Builder(this).setTitle("MAG bağlantı testi").setMessage(result).setPositiveButton("Tamam",null).show()
-                }
-            }
-        }.start()
-    }
-    private fun magDialog(old:MagRecord?=null) {
-        val l=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(12),dp(20),dp(12)) }
-        val n=input("Liste adı"); n.setText(old?.name ?: "MAG Portal ${magRecords.size+1}")
-        val h=input("Portal URL"); h.setText(old?.portal ?: "")
-        val m=input("MAC adresi"); m.setText(old?.mac ?: "")
-        l.addView(n); l.addView(h); l.addView(m)
-        val d=AlertDialog.Builder(this).setTitle("MAG / Stalker Portal").setView(l).setMessage("Kayıt sonrası Aç seçeneği ile sunucu erişimini test edebilirsiniz. Yayın henüz aktif değil.").setPositiveButton("Kaydet",null).setNegativeButton("İptal",null).create()
-        d.show()
-        d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            val portal=h.text.toString().trim(); val mac=m.text.toString().trim().uppercase(Locale.ROOT)
-            val valid=try { val u=URL(portal); u.protocol in listOf("http","https") && u.host.isNotBlank() && u.userInfo==null } catch(e:Exception) { false }
-            if(!valid) { h.error="Geçerli portal URL girin"; return@setOnClickListener }
-            if(!Regex("[0-9A-F]{2}(:[0-9A-F]{2}){5}").matches(mac)) { m.error="MAC biçimi: XX:XX:XX:XX:XX:XX"; return@setOnClickListener }
-            val record=MagRecord(old?.id ?: java.util.UUID.randomUUID().toString(),n.text.toString().trim().ifBlank { "MAG Portal" },portal,mac)
-            saveMag(magRecords.filter { it.id!=record.id }+record); d.dismiss()
-        }
-    }
     private fun pickFile() { try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="*/*" },501) } catch(e:Exception) { toast("Dosya seçici bulunamadı") } }
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
         super.onActivityResult(requestCode,resultCode,data); if(requestCode!=501) return; if(resultCode!=RESULT_OK) { replacement=null; return }; val uri=data?.data ?: return; if(busy) { toast("Liste yükleniyor"); return }; busy=true
@@ -437,7 +396,7 @@ class MainActivity : Activity() {
     override fun dispatchKeyEvent(event:KeyEvent):Boolean {
         if(screen!=null) {
             val ok=event.keyCode==KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode==KeyEvent.KEYCODE_ENTER
-            if(ok && panel==null) { if(event.action==KeyEvent.ACTION_UP && !event.isCanceled) { if(event.eventTime-event.downTime>=700) saveTrial() else player?.let { if(it.playWhenReady) it.pause() else it.play() } }; return true }
+            if(ok && panel==null) { if(event.action==KeyEvent.ACTION_UP && !event.isCanceled) { if(event.eventTime-event.downTime>=700) { if(category==magDemo) playing.getOrNull(current)?.let { toggleMagFavorite(it) } else saveTrial() } else player?.let { if(it.playWhenReady) it.pause() else it.play() } }; return true }
             if(event.action==KeyEvent.ACTION_DOWN) when(event.keyCode) { KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT -> { side(); return true }; KeyEvent.KEYCODE_BACK -> { if(panel!=null) hideSide() else { closeVideo(); render(); binding.sectionContainer.getChildAt(categories.indexOf(category))?.requestFocus() }; return true } }
         }; if(screen==null && category==iptv && source==Source.FILE && selectedFile!=null && event.keyCode==KeyEvent.KEYCODE_BACK && event.action==KeyEvent.ACTION_DOWN) { selectedFile=null; renderRight(); right?.getChildAt(1)?.requestFocus(); return true }; return super.dispatchKeyEvent(event)
     }
