@@ -385,7 +385,7 @@ class MainActivity : Activity() {
             if(target.protocol !in listOf("http","https")) throw java.io.IOException("Unsupported protocol")
             val c=target.openConnection() as java.net.HttpURLConnection
             try {
-                c.connectTimeout=30000; c.readTimeout=90000
+                c.connectTimeout=60000; c.readTimeout=180000
                 c.instanceFollowRedirects=false
                 c.setRequestProperty("User-Agent","DilekciWorldTV/1.0")
                 val status=c.responseCode
@@ -413,7 +413,19 @@ class MainActivity : Activity() {
             return c.inputStream.bufferedReader(Charsets.UTF_8).use { parse(it,c.url.toString(),true) }
         } finally { c.disconnect() }
     }
+    private class PlaylistTimeout(val phase:String, cause:java.net.SocketTimeoutException):java.io.IOException(phase,cause)
+    private fun importRemotePlaylist(u:String):Int {
+        val c=try { openPlaylistConnection(u) } catch(e:java.net.SocketTimeoutException) {
+            throw PlaylistTimeout("Sunucu bağlantısı veya yanıtı",e)
+        }
+        try {
+            return c.inputStream.bufferedReader(Charsets.UTF_8).use { importDb("iptv",it,c.url.toString()) }
+        } catch(e:java.net.SocketTimeoutException) {
+            throw PlaylistTimeout("Liste verisi okunurken",e)
+        } finally { c.disconnect() }
+    }
     private fun connectionError(e:Exception):String = when(e) {
+        is PlaylistTimeout -> "${e.phase}: zaman aşımı (2 deneme)"
         is ListLimit -> "Liste güvenli boyut sınırını aşıyor; eski kayıtlar korundu"
         is HttpFailure -> "Sunucu yanıtı: HTTP ${e.status}"
         is java.net.UnknownHostException -> "Sunucu adresi bulunamadı (DNS)"
@@ -430,11 +442,11 @@ class MainActivity : Activity() {
         val progress=AlertDialog.Builder(this).setTitle("Deneme listesi yükleniyor").setMessage("Lütfen bekleyin...").setCancelable(false).create(); progress.show()
         Thread {
             val message=try {
-                val c=openPlaylistConnection(u)
-                try {
-                    val n=c.inputStream.bufferedReader(Charsets.UTF_8).use { importDb("iptv",it,c.url.toString()) }
-                    "$n yeni kanal eklendi"
-                } finally { c.disconnect() }
+                val n=try { importRemotePlaylist(u) } catch(e:PlaylistTimeout) {
+                    runOnUiThread { if(!isDestroyed && !isFinishing) progress.setMessage("Zaman aşımı: ikinci deneme yapılıyor...") }
+                    importRemotePlaylist(u)
+                }
+                "$n yeni kanal eklendi"
             } catch(e:Exception) { connectionError(e) }
             runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) { progress.dismiss(); refreshDb(); select(iptvTrial); toast(message) } }
         }.start()
