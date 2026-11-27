@@ -414,15 +414,44 @@ class MainActivity : Activity() {
         } finally { c.disconnect() }
     }
     private class PlaylistTimeout(val phase:String, cause:java.net.SocketTimeoutException):java.io.IOException(phase,cause)
+    private val playlistClient by lazy {
+        okhttp3.OkHttpClient.Builder()
+            .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(180, java.util.concurrent.TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .addNetworkInterceptor { chain ->
+                val response = chain.proceed(chain.request())
+                if (response.code in listOf(301,302,303,307,308)) {
+                    val next = response.header("Location")?.let { response.request.url.resolve(it) }
+                    if (response.request.url.isHttps && next != null && !next.isHttps) {
+                        response.close()
+                        throw java.io.IOException("HTTPS downgrade blocked")
+                    }
+                }
+                response
+            }
+            .retryOnConnectionFailure(true)
+            .build()
+    }
     private fun importRemotePlaylist(u:String):Int {
-        val c=try { openPlaylistConnection(u) } catch(e:java.net.SocketTimeoutException) {
-            throw PlaylistTimeout("Sunucu bağlantısı veya yanıtı",e)
+        val request = okhttp3.Request.Builder().url(u)
+            .header("User-Agent", "DilekciWorldTV/1.0").get().build()
+        val response = try { playlistClient.newCall(request).execute() }
+        catch(e:java.net.SocketTimeoutException) {
+            throw PlaylistTimeout("OkHttp sunucu bağlantısı veya yanıtı",e)
         }
-        try {
-            return c.inputStream.bufferedReader(Charsets.UTF_8).use { importDb("iptv",it,c.url.toString()) }
-        } catch(e:java.net.SocketTimeoutException) {
-            throw PlaylistTimeout("Liste verisi okunurken",e)
-        } finally { c.disconnect() }
+        response.use { r ->
+            if(!r.isSuccessful) throw HttpFailure(r.code)
+            val body = r.body ?: throw java.io.IOException("Boş sunucu yanıtı")
+            try {
+                return body.byteStream().bufferedReader(Charsets.UTF_8).use {
+                    importDb("iptv",it,r.request.url.toString())
+                }
+            } catch(e:java.net.SocketTimeoutException) {
+                throw PlaylistTimeout("OkHttp liste verisi okunurken",e)
+            }
+        }
     }
     private fun connectionError(e:Exception):String = when(e) {
         is PlaylistTimeout -> "${e.phase}: zaman aşımı (2 deneme)"
