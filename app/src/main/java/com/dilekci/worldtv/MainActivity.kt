@@ -111,7 +111,7 @@ class MainActivity : Activity() {
     override fun onCreate(state:Bundle?) {
         super.onCreate(state); binding=ActivityMainBinding.inflate(layoutInflater); setContentView(binding.root)
         read("world_tv_saved","channels","").filter { it.country in codes && it.url.startsWith("https://") }.forEach { c -> if(channels.none { same(it,c) }) { channels.add(c); saved.add(c) } }
-        Source.values().filter { it!=Source.LEGACY && it!=Source.FILE }.forEach { lists.getValue(it).addAll(read("iptv_saved",it.key,"IPTV")) }
+        Source.values().filter { it!=Source.LEGACY }.forEach { lists.getValue(it).addAll(read("iptv_saved",it.key,"IPTV")) }
         loadConnections()
         importedWorld.addAll(read("trial_imports","world","ZZ"))
         importedIptv.addAll(read("trial_imports","iptv","IPTV"))
@@ -196,22 +196,19 @@ class MainActivity : Activity() {
         binding.contentTitle.text="IPTV BAĞLANTI AYARLARI"; binding.contentDescription.text="Yüklenen listeleri yönet"
         val l=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; val r=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         row.addView(ScrollView(this).apply { addView(l) },LinearLayout.LayoutParams(0,-1,1f)); row.addView(ScrollView(this).apply { addView(r) },LinearLayout.LayoutParams(0,-1,1.5f))
-        l.addView(item("Xtream Codes Ekle",16f) { xtream() }); l.addView(item("M3U / M3U8 URL Ekle",16f) { m3u() }); l.addView(item("Dosyadan Yükle",16f) { pickFile() })
         l.addView(item("Dünya TV Deneme",16f) { select(trial) })
         l.addView(item("IPTV Deneme",16f) { select(iptvTrial) })
         r.addView(text("YÜKLENEN LİSTELER"))
         connections.forEach { c -> r.addView(item("${c.source.title}: ${c.name}",16f) {
-            AlertDialog.Builder(this).setTitle(c.name).setItems(arrayOf("Aç","Değiştir","Sil")) { _,i -> when(i) {
+            AlertDialog.Builder(this).setTitle(c.name).setItems(arrayOf("Aç","Sil")) { _,i -> when(i) {
                 0 -> { source=c.source; selectedConnection=c.id; group="Tüm Kanallar"; select(iptv) }
-                1 -> { if(busy) toast("Liste yükleniyor") else if(c.source==Source.URL) m3u(c) else xtream(c) }
-                2 -> AlertDialog.Builder(this).setMessage("Bu bağlantı silinsin mi?").setPositiveButton("Sil") { _,_ -> persistConnections(connections.filter { it.id!=c.id }) }.setNegativeButton("İptal",null).show()
+                1 -> AlertDialog.Builder(this).setMessage("Bu bağlantı silinsin mi?").setPositiveButton("Sil") { _,_ -> persistConnections(connections.filter { it.id!=c.id }) }.setNegativeButton("İptal",null).show()
             } }.show()
         }) }
         files.forEach { f -> r.addView(item(f.name,16f) {
-            AlertDialog.Builder(this).setTitle(f.name).setItems(arrayOf("Aç","Değiştir","Sil")) { _,i -> when(i) {
+            AlertDialog.Builder(this).setTitle(f.name).setItems(arrayOf("Aç","Sil")) { _,i -> when(i) {
                 0->{ source=Source.FILE; selectedFile=f.id; group="Tüm Kanallar"; select(iptv) }
-                1->{ if(!busy) { replacement=f.id; pickFile() } }
-                2->{ AlertDialog.Builder(this).setMessage("Liste silinsin mi? Orijinal dosya korunur.").setPositiveButton("Sil") { _,_-> if(!busy) persistFiles(files.filter { it.id!=f.id }) }.setNegativeButton("İptal",null).show() }
+                1->{ AlertDialog.Builder(this).setMessage("Liste silinsin mi? Orijinal dosya korunur.").setPositiveButton("Sil") { _,_-> if(!busy) persistFiles(files.filter { it.id!=f.id }) }.setNegativeButton("İptal",null).show() }
             } }.show()
         }) }
     }
@@ -338,43 +335,29 @@ class MainActivity : Activity() {
             } }
         }.start()
     }
-    private fun fetch(u:String):Pair<String,String> { val c=URL(u).openConnection(); c.connectTimeout=20000; c.readTimeout=30000; val body=c.getInputStream().bufferedReader(Charsets.UTF_8).use { it.readText() }; return body to c.url.toString() }
-    private fun importUrl(u:String,s:Source,name:String,id:String?=null) {
-        if(!u.startsWith("https://") && !u.startsWith("http://")) { toast("Geçerli URL girin"); return }
-        if(busy) { toast("Liste yükleniyor"); return }; busy=true
-        val key=id ?: java.util.UUID.randomUUID().toString()
-        val previous=connections.toList()
-        val progress=AlertDialog.Builder(this).setTitle("Liste yükleniyor").setMessage("Lütfen bekleyin...").setCancelable(false).create()
-        progress.show()
-        Thread {
-            var updated:List<Connection>?=null
-            val message=try {
-                val (body,base)=fetch(u); val a=parse(body,base)
-                if(a.isEmpty()) "IPTV kanalı bulunamadı" else {
-                    val next=previous.filter { it.id!=key }+Connection(key,name,s,a)
-                    if(storeConnections(next)) { updated=next; "${a.size} kanal kaydedildi" } else "Liste kaydedilemedi"
-                }
-            } catch(e:Exception) { "Bağlantı kurulamadı veya liste okunamadı" }
-            runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) {
-                progress.dismiss()
-                updated?.let { connections.clear(); connections.addAll(it); source=s; selectedConnection=key; group="Tüm Kanallar"; if(screen==null) render() }
-                toast(message)
-            } }
-        }.start()
+    private class HttpFailure(val status:Int):java.io.IOException()
+    private fun fetch(u:String):Pair<String,String> {
+        val c=URL(u).openConnection() as java.net.HttpURLConnection
+        try {
+            c.connectTimeout=20000; c.readTimeout=60000
+            c.instanceFollowRedirects=true
+            c.setRequestProperty("User-Agent","DilekciWorldTV/1.0")
+            val status=c.responseCode
+            if(status !in 200..299) throw HttpFailure(status)
+            val body=c.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            return body to c.url.toString()
+        } finally { c.disconnect() }
+    }
+    private fun connectionError(e:Exception):String = when(e) {
+        is HttpFailure -> "Sunucu yanıtı: HTTP ${e.status}"
+        is java.net.UnknownHostException -> "Sunucu adresi bulunamadı (DNS)"
+        is java.net.SocketTimeoutException -> "Bağlantı zaman aşımına uğradı"
+        is javax.net.ssl.SSLException -> "HTTPS güvenlik bağlantısı başarısız"
+        is java.net.ConnectException -> "Sunucuya bağlantı kurulamadı"
+        is java.net.MalformedURLException -> "Sunucu adresi geçersiz"
+        else -> "Liste okunamadı (${e.javaClass.simpleName})"
     }
     private fun input(h:String)=EditText(this).apply { hint=h; setSingleLine(true); textSize=18f }
-    private fun m3u(old:Connection?=null) {
-        val l=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(12),dp(20),dp(12)) }
-        val n=input("Liste adı"); n.setText(old?.name ?: "M3U ${connections.count { it.source==Source.URL }+1}")
-        val e=input("M3U veya M3U8 URL"); l.addView(n); l.addView(e)
-        AlertDialog.Builder(this).setTitle("M3U URL").setView(l).setPositiveButton("Bağlan") { _,_ -> importUrl(e.text.toString().trim(),Source.URL,n.text.toString().trim().ifBlank { "M3U URL" },old?.id) }.setNegativeButton("İptal",null).show()
-    }
-    private fun xtream(old:Connection?=null) {
-        val l=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(12),dp(20),dp(12)) }
-        val n=input("Liste adı"); n.setText(old?.name ?: "Xtream ${connections.count { it.source==Source.XTREAM }+1}")
-        val h=input("Sunucu URL"); val u=input("Kullanıcı adı"); val p=input("Şifre"); p.inputType=129; l.addView(n); l.addView(h); l.addView(u); l.addView(p)
-        AlertDialog.Builder(this).setTitle("Xtream Codes").setView(l).setPositiveButton("Bağlan") { _,_ -> val host=h.text.toString().trim().trimEnd('/'); val user=u.text.toString().trim(); val pass=p.text.toString(); if(host.isBlank() || user.isBlank() || pass.isBlank()) toast("Tüm alanları doldurun") else importUrl("$host/get.php?username=${URLEncoder.encode(user,"UTF-8")}&password=${URLEncoder.encode(pass,"UTF-8")}&type=m3u_plus&output=m3u8",Source.XTREAM,n.text.toString().trim().ifBlank { "Xtream Codes" },old?.id) }.setNegativeButton("İptal",null).show()
-    }
     private fun importTrialUrl(u:String) {
         if(!u.startsWith("https://") && !u.startsWith("http://")) { toast("Geçerli URL girin"); return }
         if(busy) { toast("Liste yükleniyor"); return }; busy=true
@@ -384,12 +367,12 @@ class MainActivity : Activity() {
         Thread {
             var updated:List<Channel>?=null
             val message=try {
-                val (body,base)=fetch(u); val items=parse(body,base)
-                if(items.isEmpty()) "IPTV kanalı bulunamadı" else {
+                val (body,base)=fetch(u); val items=if(body.trimStart().removePrefix("\uFEFF").trimStart().startsWith("#EXTM3U",true)) parse(body,base) else emptyList()
+                if(items.isEmpty()) "Sunucu geçerli M3U listesi veya kanal döndürmedi" else {
                     val next=(previous+items).distinctBy { it.url }
                     if(write("trial_imports","iptv",next)) { updated=next; "${items.size} kanal deneme listesine alındı" } else "Deneme listesi kaydedilemedi"
                 }
-            } catch(e:Exception) { "Bağlantı kurulamadı veya liste okunamadı" }
+            } catch(e:Exception) { connectionError(e) }
             runOnUiThread { busy=false; if(!isDestroyed && !isFinishing) {
                 progress.dismiss()
                 updated?.let { importedIptv.clear(); importedIptv.addAll(it); select(iptvTrial) }
